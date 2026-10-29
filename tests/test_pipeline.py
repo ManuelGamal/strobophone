@@ -61,3 +61,11 @@ def test_scale_uncertainty_widens_the_ci():
     assert (tilted.g_ci_with_scale[1] - tilted.g_ci_with_scale[0]) > 2 * (
         exact.g_ci_with_scale[1] - exact.g_ci_with_scale[0]
     )
+
+
+def test_fit_stops_at_the_first_bounce():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, G_PX, bounce_track
+
+    m = measure_free_fall(bounce_track(e=0.7, noise=0.3), FPS, Scale(600.0, 0.0))
+    assert m.fit.g == pytest.approx(G_PX / 600, rel=0.02)

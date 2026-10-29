@@ -56,11 +56,14 @@ def plan_zoom(frames: np.ndarray, target_px: float = 32, max_zoom: float = 6) ->
     widths = []
     for m in _motion_masks(frames):
         lab, k = ndimage.label(m)
-        sizes = [
-            (sl[1].stop - sl[1].start)
+        blobs = [
+            (sl[1].stop - sl[1].start, np.count_nonzero(lab[sl] == i + 1))
             for i, sl in enumerate(ndimage.find_objects(lab))
-            if np.count_nonzero(lab[sl] == i + 1) >= 4
         ]
+        # Codec flicker makes specks of a few pixels; keep blobs that are at least
+        # a tenth of the frame's largest mover so they don't pass for a tiny object.
+        largest = max((area for _, area in blobs), default=0)
+        sizes = [w for w, area in blobs if area >= max(4, 0.1 * largest)]
         if sizes:
             widths.append(min(sizes))
     if not widths:
@@ -79,8 +82,8 @@ def parse_idet(log: str) -> dict[str, int]:
     )
     if not found:
         raise ValueError("no idet multi-frame summary in the log")
-    m = (None, *found[-1])  # ffmpeg prints an empty probe-pass summary first
-    return {"tff": int(m[1]), "bff": int(m[2]), "progressive": int(m[3])}
+    tff, bff, progressive = found[-1]  # ffmpeg prints an empty probe-pass summary first
+    return {"tff": int(tff), "bff": int(bff), "progressive": int(progressive)}
 
 
 def zigzag_score(y: np.ndarray) -> float:
@@ -118,13 +121,26 @@ def _ffmpeg(*args: str) -> str:
 
 
 def _filter(src: Path, dst: Path, filters: list[str]) -> Path:
-    _ffmpeg("-loglevel", "error", "-i", str(src), "-vf", ",".join(filters),
-            "-c:v", "libx264", "-crf", "12", str(dst))
+    _ffmpeg(
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
+        "-vf",
+        ",".join(filters),
+        "-c:v",
+        "libx264",
+        "-crf",
+        "12",
+        str(dst),
+    )
     return dst
 
 
 def is_interlaced(video: Path) -> bool:
-    counts = parse_idet(_ffmpeg("-loglevel", "info", "-i", str(video), "-vf", "idet", "-f", "null", "-"))
+    counts = parse_idet(
+        _ffmpeg("-loglevel", "info", "-i", str(video), "-vf", "idet", "-f", "null", "-")
+    )
     return counts["tff"] + counts["bff"] > counts["progressive"]
 
 
@@ -146,7 +162,9 @@ def prepare(video, workdir) -> tuple[Prep, Path, float]:
         # and keep the one whose motion track is smoothest.
         scores = {}
         for p in ("tff", "bff"):
-            out = _filter(video, workdir / f"{video.stem}_{p}.mp4", [f"yadif=mode=1:parity={p}"])
+            out = _filter(
+                video, workdir / f"{video.stem}_{p}.mp4", [f"yadif=mode=1:parity={p}"]
+            )
             scores[p] = (zigzag_score(_motion_centroid_y(read_video(out)[0])), out)
         parity = min(scores, key=lambda p: scores[p][0])
         clip = scores[parity][1]
@@ -155,6 +173,12 @@ def prepare(video, workdir) -> tuple[Prep, Path, float]:
     prep = Prep(zoomed.crop, zoomed.zoom, parity)
     if prep.crop:
         x, y, w, h = prep.crop
-        clip = _filter(clip, workdir / f"{video.stem}_zoom.mp4",
-                       [f"crop={w}:{h}:{x}:{y}", f"scale=iw*{prep.zoom:g}:ih*{prep.zoom:g}:flags=lanczos"])
+        clip = _filter(
+            clip,
+            workdir / f"{video.stem}_zoom.mp4",
+            [
+                f"crop={w}:{h}:{x}:{y}",
+                f"scale=iw*{prep.zoom:g}:ih*{prep.zoom:g}:flags=lanczos",
+            ],
+        )
     return prep, clip, fps

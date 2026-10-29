@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from strobophone.bounce import find_bounces
 from strobophone.calibration import Scale
 from strobophone.fits import FreeFallResult, detect_release, fit_free_fall
 
@@ -29,6 +30,9 @@ def measure_free_fall(y_px: np.ndarray, fps: float, scale: Scale) -> FreeFallMea
     frames = np.nonzero(~np.isnan(y))[0]
     release = int(frames[detect_release(y[frames])])
     use = frames[frames >= release]
+    bounces = find_bounces(y)
+    if bounces:  # the lowest frame may already be after impact, so drop it too
+        use = use[use < bounces[0]]
     fit = fit_free_fall((use - release) / fps, y[use], scale.px_per_m)
 
     fit_half_width = (fit.ci_high - fit.ci_low) / 2

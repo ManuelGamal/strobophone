@@ -52,6 +52,14 @@ def test_large_object_is_not_zoomed(tmp_path):
     assert plan_zoom(frames, target_px=32).zoom == 1
 
 
+def test_codec_flicker_specks_do_not_trigger_zoom(tmp_path):
+    make_free_fall_video(tmp_path / "big.mp4", ball_radius_m=0.06)
+    frames, _ = read_video(tmp_path / "big.mp4")
+    frames = frames.copy()
+    frames[1::2, 300:302, 20:23] = 255  # a 2x3 px speck flickering every frame
+    assert plan_zoom(frames, target_px=32).zoom == 1
+
+
 def test_prep_maps_boxes_back_to_original_pixels():
     p = Prep(crop=(150, 0, 100, 480), zoom=4.0, parity=None)
     boxes = np.array([[40.0, 400.0, 80.0, 440.0]])
