@@ -29,9 +29,9 @@ from openai import AsyncOpenAI, OpenAI
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from strobophone.calibration import scale_from_reference  # noqa: E402
-from strobophone.pipeline import measure_free_fall  # noqa: E402
-from strobophone.synthetic import FreeFallTruth, make_free_fall_video  # noqa: E402
+from strobophone.calibration import scale_from_reference
+from strobophone.pipeline import measure_free_fall
+from strobophone.synthetic import FreeFallTruth, make_free_fall_video
 
 OUT = ROOT / "outputs" / "smoke"
 BASE_URL = "https://api.meta.ai/v1"
@@ -209,13 +209,26 @@ async def sam_track(api_key: str, video: Path, concept: str):
 
 
 def check_sam(api_key: str, video: Path, truth: FreeFallTruth) -> str:
-    result = asyncio.run(sam_track(api_key, video, "orange ball"))
+    # The synthetic ball is a flat, unshaded disk: SAM 3.1 finds nothing for
+    # "ball"/"orange ball" but tracks it in every frame as "circle". Real footage
+    # of a shaded ball is found as "ball" (see Meta's pingpong sample).
+    result = asyncio.run(sam_track(api_key, video, "circle"))
     boxes = [r for r in result.records if r.kind == "box" and r.frame is not None]
-    save("sam_boxes.json", [
-        {"object_id": b.object_id, "frame": b.frame.frame_index, "l": b.left, "t": b.top,
-         "r": b.right, "b": b.bottom, "c": b.confidence}
-        for b in boxes
-    ])
+    save(
+        "sam_boxes.json",
+        [
+            {
+                "object_id": b.object_id,
+                "frame": b.frame.frame_index,
+                "l": b.left,
+                "t": b.top,
+                "r": b.right,
+                "b": b.bottom,
+                "c": b.confidence,
+            }
+            for b in boxes
+        ],
+    )
     if result.outcome.status != "completed" or not boxes:
         return f"FAILED: outcome {result.outcome.status}, {len(boxes)} boxes, media {result.media}"
     ids = sorted({b.object_id for b in boxes})
@@ -230,9 +243,11 @@ def check_sam(api_key: str, video: Path, truth: FreeFallTruth) -> str:
     tracked = ~np.isnan(y)
     px_err = np.abs(y[tracked] - truth.ball_y_px[tracked]).mean()
     err = 100 * abs(m.fit.g - truth.g) / truth.g
-    return (f"{len(ids)} object(s), {tracked.sum()}/{len(y)} frames tracked | mean centre error "
-            f"{px_err:.2f} px | g = {m.fit.g:.3f} m/s^2, 95% CI [{m.g_ci_with_scale[0]:.3f}, "
-            f"{m.g_ci_with_scale[1]:.3f}] (true {truth.g}, error {err:.2f}%)")
+    return (
+        f"{len(ids)} object(s), {tracked.sum()}/{len(y)} frames tracked | mean centre error "
+        f"{px_err:.2f} px | g = {m.fit.g:.3f} m/s^2, 95% CI [{m.g_ci_with_scale[0]:.3f}, "
+        f"{m.g_ci_with_scale[1]:.3f}] (true {truth.g}, error {err:.2f}%)"
+    )
 
 
 def check_voice(api_key: str, wav: Path) -> str:
