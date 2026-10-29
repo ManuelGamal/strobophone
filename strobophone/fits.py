@@ -14,6 +14,7 @@ class FreeFallResult:
     ci_high: float
     n_points: int
     residual_rms_px: float
+    coeffs: tuple[float, float, float] = (0.0, 0.0, 0.0)  # y(t) = c0 t^2 + c1 t + c2, px and s
 
 
 BOOTSTRAP_SAMPLES = 2000
@@ -53,4 +54,5 @@ def fit_free_fall(t_s: np.ndarray, y_px: np.ndarray, px_per_m: float, seed: int 
         ci_high=float(np.percentile(g_samples, 97.5)),
         n_points=len(t),
         residual_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        coeffs=tuple(float(c) for c in coeffs),
     )

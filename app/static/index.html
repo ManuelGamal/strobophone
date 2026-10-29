@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StroboPhone</title>
+<meta name="description" content="Turn a phone video of a falling ball into a measurement of g with its uncertainty.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2315181a'/%3E%3Cg fill='%23fb923c'%3E%3Ccircle cx='16' cy='6' r='2.2'/%3E%3Ccircle cx='16' cy='12' r='2.6'/%3E%3Ccircle cx='16' cy='20' r='3'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f2; --surface: #ffffff; --surface-2: #eceee9; --line: #d5d8d0;
+    --text: #15181a; --muted: #565d62; --accent: #c2410c; --accent-ink: #ffffff;
+    --trace: #0f6e8c; --fit: #c2410c; --ok: #1d6b3a; --bad: #a61b1b;
+    --grid: #e3e5df; --radius: 6px;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    --sans: "IBM Plex Sans", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1113; --surface: #161a1d; --surface-2: #1d2226; --line: #2c3338;
+      --text: #e7eae6; --muted: #9aa3a8; --accent: #fb923c; --accent-ink: #1a0d04;
+      --trace: #5cc8e8; --fit: #fb923c; --ok: #5fd08a; --bad: #ff7b7b; --grid: #222a2f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1113; --surface: #161a1d; --surface-2: #1d2226; --line: #2c3338;
+    --text: #e7eae6; --muted: #9aa3a8; --accent: #fb923c; --accent-ink: #1a0d04;
+    --trace: #5cc8e8; --fit: #fb923c; --ok: #5fd08a; --bad: #ff7b7b; --grid: #222a2f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+           border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 24px; }
+  h1 { font: 600 22px/1.2 var(--mono); letter-spacing: .02em; margin: 0; }
+  h1 span { color: var(--accent); }
+  .tag { color: var(--muted); margin: 0; }
+  h2 { font: 500 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); }
+  @media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .stack > * + * { margin-top: 16px; }
+  label { display: block; font-weight: 500; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+  .drop { display: block; border: 1px dashed var(--line); border-radius: var(--radius); padding: 20px 12px; text-align: center;
+          cursor: pointer; background: var(--surface-2); }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #file-name { font-family: var(--mono); font-size: 14px; overflow-wrap: anywhere; }
+  fieldset { border: 0; padding: 0; margin: 0; }
+  legend { font-weight: 500; margin-bottom: 6px; padding: 0; }
+  .choice { display: flex; gap: 8px; align-items: center; min-height: 32px; font-weight: 400; margin: 0; cursor: pointer; }
+  input[type=number] { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius);
+                       background: var(--surface-2); color: var(--text); font: 15px var(--mono); }
+  input:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { min-height: 44px; width: 100%; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink);
+           font: 600 15px var(--sans); cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .log { font: 13px/1.6 var(--mono); background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; min-height: 120px;
+         max-height: 260px; overflow-y: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .log .err { color: var(--bad); }
+  .log .done { color: var(--ok); }
+  .readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+  .g { font: 600 clamp(40px, 8vw, 64px)/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .g small { font-size: .4em; color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .ci { font: 16px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ref { font: 14px var(--mono); color: var(--muted); }
+  dl.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 16px 0 0; }
+  dl.facts div { border-top: 1px solid var(--line); padding-top: 8px; }
+  dt { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  dd { margin: 2px 0 0; font: 15px var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .viewer { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; }
+  .viewer video { display: block; width: 100%; height: auto; max-height: 70vh; }
+  .viewer canvas { position: absolute; inset: 0; pointer-events: none; }
+  svg.plot { width: 100%; height: auto; display: block; font: 11px var(--mono); }
+  .plot .grid line { stroke: var(--grid); }
+  .plot .axis text { fill: var(--muted); }
+  .plot .axis-label { fill: var(--muted); font-size: 12px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font: 13px var(--mono); color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 18px; height: 0; vertical-align: middle; margin-right: 6px; border-top: 2px solid; }
+  .legend .pt { width: 8px; height: 8px; border: 0; border-radius: 50%; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 16px; }
+  [hidden] { display: none !important; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Strobo<span>Phone</span></h1>
+    <p class="tag">A phone video in, a measurement with error bars out.</p>
+  </header>
+
+  <div class="grid">
+    <div class="stack">
+      <form id="form" class="panel stack" novalidate>
+        <h2>1 · Clip</h2>
+        <div>
+          <label class="drop" id="drop">
+            <input type="file" id="video" name="video" accept="video/*" required>
+            <span id="file-name">Choose or drop a video of a falling ball</span>
+          </label>
+          <p class="hint">Side-on, camera still, under 20 s. Slow motion gives a sharper result.</p>
+        </div>
+        <fieldset>
+          <legend>Scale</legend>
+          <label class="choice"><input type="radio" name="scale" value="A4" checked> A4 sheet in the fall plane</label>
+          <label class="choice"><input type="radio" name="scale" value="px"> Known pixels per metre</label>
+          <div id="px-field" hidden>
+            <label for="px_per_m" class="sr">Pixels per metre</label>
+            <input type="number" id="px_per_m" min="1" step="any" placeholder="e.g. 400" aria-describedby="px-hint">
+            <p class="hint" id="px-hint">In pixels of the original video.</p>
+          </div>
+        </fieldset>
+        <button id="run" type="submit" disabled>Measure g</button>
+        <p class="hint" id="form-error" role="alert"></p>
+      </form>
+
+      <section class="panel" aria-labelledby="log-h">
+        <h2 id="log-h">2 · Pipeline</h2>
+        <pre class="log" id="log" aria-live="polite">Waiting for a clip.</pre>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="panel" aria-labelledby="res-h">
+        <h2 id="res-h">3 · Result</h2>
+        <div id="empty" class="empty">Upload a clip to measure the gravitational acceleration.</div>
+        <div id="result" hidden>
+          <div class="readout">
+            <div class="g" id="g"></div>
+            <div>
+              <div class="ci" id="ci"></div>
+              <div class="ref">reference 9.79 m/s² (Cairo)</div>
+            </div>
+          </div>
+          <dl class="facts" id="facts"></dl>
+        </div>
+      </section>
+
+      <section class="panel" id="viewer-panel" aria-labelledby="track-h" hidden>
+        <h2 id="track-h">Tracking · SAM 3.1</h2>
+        <div class="viewer">
+          <video id="player" controls muted playsinline preload="auto"></video>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+        </div>
+        <p class="hint">Boxes are the tracker's output in each frame; frames used in the fit are drawn solid.</p>
+      </section>
+
+      <section class="panel" id="plot-panel" aria-labelledby="plot-h" hidden>
+        <h2 id="plot-h">Fall distance vs time</h2>
+        <div id="plot"></div>
+        <div class="legend" aria-hidden="true">
+          <span><i class="pt" style="border:1.6px solid var(--trace)"></i>tracked, in fit</span>
+          <span><i class="pt" style="border:1.6px solid var(--muted)"></i>tracked, not in fit</span>
+          <span><i style="border-color:var(--fit)"></i>fit  y = ½gt² + v₀t</span>
+        </div>
+        <div id="resid"></div>
+        <p class="sr" id="plot-summary"></p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const form = $("form"), fileInput = $("video"), runBtn = $("run"), logEl = $("log");
+let current = null;
+
+fileInput.addEventListener("change", () => {
+  const f = fileInput.files[0];
+  $("file-name").textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : "Choose or drop a video of a falling ball";
+  runBtn.disabled = !f;
+});
+const drop = $("drop");
+["dragenter", "dragover"].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((e) => drop.addEventListener(e, () => drop.classList.remove("over")));
+drop.addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  if (ev.dataTransfer.files.length) { fileInput.files = ev.dataTransfer.files; fileInput.dispatchEvent(new Event("change")); }
+});
+form.addEventListener("change", (ev) => {
+  if (ev.target.name === "scale") $("px-field").hidden = ev.target.value !== "px";
+});
+
+function setLog(lines, status, error) {
+  logEl.textContent = "";
+  for (const l of lines) logEl.append(l + "\n");
+  if (status === "queued") logEl.append("queued…\n");
+  if (status === "failed") { const s = document.createElement("span"); s.className = "err"; s.textContent = "failed: " + error; logEl.append(s); }
+  if (status === "done") { const s = document.createElement("span"); s.className = "done"; s.textContent = "done"; logEl.append(s); }
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("form-error").textContent = "";
+  const data = new FormData();
+  data.append("video", fileInput.files[0]);
+  const mode = form.querySelector("input[name=scale]:checked").value;
+  if (mode === "px") {
+    const v = parseFloat($("px_per_m").value);
+    if (!(v > 0)) { $("form-error").textContent = "Enter the scale in pixels per metre, or choose the A4 sheet."; $("px_per_m").focus(); return; }
+    data.append("px_per_m", v);
+  } else data.append("reference", mode);
+  runBtn.disabled = true; runBtn.textContent = "Measuring…";
+  setLog(["uploading…"]);
+  try {
+    const r = await fetch("api/measure", { method: "POST", body: data });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    await poll(body.id);
+  } catch (e) {
+    setLog([], "failed", e.message);
+  } finally {
+    runBtn.disabled = !fileInput.files[0]; runBtn.textContent = "Measure g";
+  }
+});
+
+async function poll(id) {
+  for (;;) {
+    const job = await (await fetch(`api/jobs/${id}`)).json();
+    setLog(job.log, job.status, job.error);
+    if (job.status === "done") return show(id, job.result);
+    if (job.status === "failed") return;
+    await new Promise((r) => setTimeout(r, 700));
+  }
+}
+
+const fmt = (x, d = 3) => x.toFixed(d);
+
+function show(id, res) {
+  current = res;
+  $("empty").hidden = true; $("result").hidden = false;
+  $("g").innerHTML = `${fmt(res.g, 2)}<small>m/s²</small>`;
+  $("ci").textContent = `95% CI [${fmt(res.ci[0])}, ${fmt(res.ci[1])}]`;
+  const p = res.prep;
+  const facts = [
+    ["frame rate", `${res.fps.toFixed(res.fps % 1 ? 2 : 0)} fps${p.parity ? " (fields)" : ""}`],
+    ["field order", p.parity || "progressive"],
+    ["zoom for SAM", p.zoom > 1 ? `${p.zoom}× on ${p.crop[2]}×${p.crop[3]} px` : "none"],
+    ["concept", `"${res.concept}"`],
+    ["points in fit", String(res.n_points)],
+    ["fit residual", `${fmt(res.residual_rms_px, 2)} px rms`],
+    ["scale", `${fmt(res.scale.px_per_m, 1)} px/m ± ${fmt(100 * res.scale.rel_uncertainty, 1)}%`],
+    ["fit-only CI", `[${fmt(res.fit_ci[0])}, ${fmt(res.fit_ci[1])}]`],
+  ];
+  $("facts").replaceChildren(...facts.map(([k, v]) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<dt></dt><dd></dd>`; d.firstChild.textContent = k; d.lastChild.textContent = v; return d;
+  }));
+  $("viewer-panel").hidden = false; $("plot-panel").hidden = false;
+  const player = $("player");
+  player.src = `api/jobs/${id}/video`;
+  drawPlot(res);
+  $("plot-summary").textContent = `${res.n_points} tracked points follow a parabola giving g = ${fmt(res.g)} m/s².`;
+}
+
+// ---- overlay: the tracked box for the frame on screen ----
+const player = $("player"), canvas = $("overlay"), ctx = canvas.getContext("2d");
+function drawOverlay() {
+  if (!current || !player.videoWidth) return;
+  const rect = player.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px"; canvas.style.height = rect.height + "px";
+  // the video is letterboxed inside its element; map original pixels into the drawn area
+  const s = Math.min(rect.width / player.videoWidth, rect.height / player.videoHeight);
+  const ox = (rect.width - player.videoWidth * s) / 2, oy = (rect.height - player.videoHeight * s) / 2;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  const i = Math.min(current.track.boxes.length - 1, Math.round(player.currentTime * current.fps));
+  const inFit = new Set(current.fit_frames);
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--fit").trim();
+  // trail of centres up to now
+  ctx.fillStyle = accent;
+  for (let k = 0; k <= i; k++) {
+    const b = current.track.boxes[k];
+    if (!b || !inFit.has(k)) continue;
+    ctx.beginPath(); ctx.arc(ox + (b[0] + b[2]) / 2 * s, oy + (b[1] + b[3]) / 2 * s, 2, 0, 7); ctx.fill();
+  }
+  const b = current.track.boxes[i];
+  if (b) {
+    ctx.strokeStyle = accent; ctx.lineWidth = 2;
+    ctx.setLineDash(inFit.has(i) ? [] : [5, 4]);
+    ctx.strokeRect(ox + b[0] * s - 3, oy + b[1] * s - 3, (b[2] - b[0]) * s + 6, (b[3] - b[1]) * s + 6);
+    ctx.setLineDash([]);
+  }
+  ctx.font = "12px IBM Plex Mono, monospace"; ctx.fillStyle = "#fff";
+  ctx.fillText(`frame ${i}  t = ${(i / current.fps).toFixed(3)} s`, 10, 18);
+}
+function loop() {
+  drawOverlay();
+  if ("requestVideoFrameCallback" in player) player.requestVideoFrameCallback(loop);
+}
+player.addEventListener("loadeddata", () => { drawOverlay(); if ("requestVideoFrameCallback" in player) player.requestVideoFrameCallback(loop); });
+player.addEventListener("seeked", drawOverlay);
+player.addEventListener("timeupdate", () => { if (!("requestVideoFrameCallback" in player)) drawOverlay(); });
+window.addEventListener("resize", () => { drawOverlay(); if (current) drawPlot(current); });
+
+// ---- plot: fall distance (m) vs time (s), with residuals ----
+const NS = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function ticks(lo, hi, n = 5) {
+  const step0 = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= step0);
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-12; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+function axes(svg, W, H, m, xr, yr, xlab, ylab, flipY) {
+  const x = (v) => m.l + (v - xr[0]) / (xr[1] - xr[0]) * (W - m.l - m.r);
+  const y = (v) => flipY ? m.t + (v - yr[0]) / (yr[1] - yr[0]) * (H - m.t - m.b) : H - m.b - (v - yr[0]) / (yr[1] - yr[0]) * (H - m.t - m.b);
+  const g = el("g", { class: "grid" }, svg), a = el("g", { class: "axis" }, svg);
+  for (const v of ticks(...xr)) { el("line", { x1: x(v), x2: x(v), y1: m.t, y2: H - m.b }, g); el("text", { x: x(v), y: H - m.b + 14, "text-anchor": "middle" }, a).textContent = v; }
+  for (const v of ticks(...yr, 4)) { el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, g); el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, a).textContent = v; }
+  if (xlab) el("text", { x: (m.l + W - m.r) / 2, y: H - 4, "text-anchor": "middle", class: "axis-label" }, svg).textContent = xlab;
+  el("text", { x: 12, y: (m.t + H - m.b) / 2, "text-anchor": "middle", class: "axis-label", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` }, svg).textContent = ylab;
+  return { x, y };
+}
+function drawPlot(res) {
+  const ppm = res.scale.px_per_m, t0 = res.release_frame / res.fps;
+  const y0 = res.fit.y[0];
+  const inFit = new Set(res.fit_frames);
+  const pts = res.track.t.map((t, i) => ({ t: t - t0, d: res.track.y[i] == null ? null : (res.track.y[i] - y0) / ppm, fit: inFit.has(i), i }))
+    .filter((p) => p.d != null && p.t >= -0.15);
+  const fit = res.fit.t.map((t, i) => ({ t: t - t0, d: (res.fit.y[i] - y0) / ppm }));
+  // size the drawing to its box so labels stay ~11px on phones
+  const W = Math.max(320, Math.min(720, $("plot").clientWidth || 640)), H = Math.round(W * 0.47), m = { l: 52, r: 12, t: 10, b: 34 };
+  const tLo = Math.min(0, ...pts.map((p) => p.t)), tHi = Math.max(...pts.map((p) => p.t));
+  const xr = [tLo - 0.03 * (tHi - tLo), tHi + 0.03 * (tHi - tLo)];
+  const yr = [Math.min(0, ...pts.map((p) => p.d)), Math.max(...pts.map((p) => p.d), ...fit.map((p) => p.d))];
+  const svg = el("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-labelledby": "plot-h" });
+  const { x, y } = axes(svg, W, H, m, xr, yr, "time since release (s)", "fall (m)", true);
+  el("path", { d: fit.map((p, k) => `${k ? "L" : "M"}${x(p.t)},${y(p.d)}`).join(""), fill: "none", stroke: "var(--fit)", "stroke-width": 2 }, svg);
+  for (const p of pts) el("circle", { cx: x(p.t), cy: y(p.d), r: 3.4, fill: "none", "stroke-width": 1.6, stroke: p.fit ? "var(--trace)" : "var(--muted)", opacity: p.fit ? 1 : .7 }, svg);
+  $("plot").replaceChildren(svg);
+
+  // residuals in px against the fit polynomial (fit coords: t since release)
+  const c = res.fit.coeffs;
+  const rs = pts.filter((p) => p.fit).map((p) => ({ t: p.t, r: res.track.y[p.i] - (c[0] * p.t ** 2 + c[1] * p.t + c[2]) }));
+  const H2 = 120, m2 = { l: 52, r: 12, t: 8, b: 26 };
+  const lim = Math.max(1, ...rs.map((p) => Math.abs(p.r))) * 1.2;
+  const svg2 = el("svg", { class: "plot", viewBox: `0 0 ${W} ${H2}`, role: "img", "aria-label": "fit residuals in pixels" });
+  const ax = axes(svg2, W, H2, m2, xr, [-lim, lim], "", "resid (px)", false);
+  el("line", { x1: m2.l, x2: W - m2.r, y1: ax.y(0), y2: ax.y(0), stroke: "var(--fit)", "stroke-width": 1 }, svg2);
+  for (const p of rs) el("circle", { cx: ax.x(p.t), cy: ax.y(p.r), r: 2.8, fill: "var(--trace)" }, svg2);
+  $("resid").replaceChildren(svg2);
+}
+</script>
+</body>
+</html>

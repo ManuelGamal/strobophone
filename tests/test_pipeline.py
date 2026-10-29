@@ -69,3 +69,15 @@ def test_fit_stops_at_the_first_bounce():
 
     m = measure_free_fall(bounce_track(e=0.7, noise=0.3), FPS, Scale(600.0, 0.0))
     assert m.fit.g == pytest.approx(G_PX / 600, rel=0.02)
+
+
+def test_measurement_exposes_the_fitted_curve_and_frames_for_plotting():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, bounce_track
+
+    y = bounce_track(e=0.7)
+    m = measure_free_fall(y, FPS, Scale(600.0, 0.0))
+    assert m.fit_frames[0] == m.release_frame
+    assert len(m.fit_frames) == m.fit.n_points
+    t = (m.fit_frames - m.release_frame) / FPS
+    np.testing.assert_allclose(np.polyval(m.fit.coeffs, t), y[m.fit_frames], atol=0.5)

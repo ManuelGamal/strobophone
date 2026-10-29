@@ -51,3 +51,19 @@ def test_reports_every_attempt_when_nothing_is_found(small_ball, tmp_path):
     path, truth = small_ball
     with pytest.raises(ValueError, match="ball.*nothing found"):
         measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker(set()))
+
+
+def test_progress_log_names_each_step(small_ball, tmp_path):
+    path, truth = small_ball
+    lines = []
+    measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"sphere"}), log=lines.append)
+    text = "\n".join(lines)
+    for expected in ("progressive", "zoom", "'ball': nothing found", "'sphere'", "g ="):
+        assert expected in text
+
+
+def test_each_attempt_outcome_is_logged_before_the_next_attempt(small_ball, tmp_path):
+    path, truth = small_ball
+    lines = []
+    measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"white ball"}), log=lines.append)
+    assert lines.index("'ball': nothing found") < lines.index("asking SAM 3.1 for 'white ball'")

@@ -37,12 +37,23 @@ def _default_tracker(video, concept, n_frames):
 
 
 def measure_video(
-    video, workdir, scale: Scale, tracker=_default_tracker, concepts=CONCEPTS
+    video, workdir, scale: Scale, tracker=_default_tracker, concepts=CONCEPTS, log=lambda line: None
 ) -> VideoMeasurement:
-    """g from a free-fall clip. `scale` is in pixels of the original video."""
+    """g from a free-fall clip. `scale` is in pixels of the original video.
+    `log` receives one human-readable line per step (shown live in the web app)."""
+    log("checking field order and object size")
     prep, clip, fps = prepare(video, workdir)
+    log(f"field order: {prep.parity or 'progressive'} -> {fps:g} fps")
+    log(f"crop {prep.crop}, zoom {prep.zoom:g}x" if prep.crop else "no crop/zoom needed")
     n_frames = len(read_video(clip)[0])
-    concept, tracks, attempts = track_with_fallbacks(clip, concepts, n_frames, tracker)
+
+    def logged_tracker(video, concept, n):
+        log(f"asking SAM 3.1 for {concept!r}")
+        return tracker(video, concept, n)
+
+    concept, tracks, attempts = track_with_fallbacks(
+        clip, concepts, n_frames, logged_tracker, on_attempt=lambda c, r: log(f"{c!r}: {r}")
+    )
     if concept is None:
         raise ValueError(
             "no falling object found: " + "; ".join(f"{c!r}: {r}" for c, r in attempts)
@@ -53,6 +64,9 @@ def measure_video(
     )
     boxes = prep.to_original(boxes)
     y = (boxes[:, 1] + boxes[:, 3]) / 2
+    result = measure_free_fall(y, fps, scale)
+    lo, hi = result.g_ci_with_scale
+    log(f"g = {result.fit.g:.3f} m/s^2, 95% CI [{lo:.3f}, {hi:.3f}] from {result.fit.n_points} points")
     return VideoMeasurement(
         prep,
         clip,
@@ -62,5 +76,5 @@ def measure_video(
         oid,
         boxes,
         y,
-        measure_free_fall(y, fps, scale),
+        result,
     )

@@ -18,6 +18,7 @@ class FreeFallMeasurement:
     scale: Scale
     release_frame: int
     g_ci_with_scale: tuple[float, float]
+    fit_frames: np.ndarray  # frame indices that entered the fit (release .. before first bounce)
 
 
 def measure_free_fall(y_px: np.ndarray, fps: float, scale: Scale) -> FreeFallMeasurement:
@@ -38,4 +39,4 @@ def measure_free_fall(y_px: np.ndarray, fps: float, scale: Scale) -> FreeFallMea
     fit_half_width = (fit.ci_high - fit.ci_low) / 2
     scale_half_width = 1.96 * scale.rel_uncertainty * fit.g
     half = float(np.hypot(fit_half_width, scale_half_width))
-    return FreeFallMeasurement(fit, scale, release, (fit.g - half, fit.g + half))
+    return FreeFallMeasurement(fit, scale, release, (fit.g - half, fit.g + half), use)

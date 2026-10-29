@@ -1,0 +1,9 @@
+.venv
+.env
+*.env
+data
+outputs
+eval
+.ruff_cache
+.playwright-mcp
+**/__pycache__
