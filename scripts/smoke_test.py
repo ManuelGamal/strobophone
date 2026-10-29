@@ -20,7 +20,6 @@ import time
 from contextlib import aclosing
 from pathlib import Path
 
-import imageio_ffmpeg
 import numpy as np
 import requests
 from dotenv import load_dotenv
@@ -28,21 +27,17 @@ from meta_sam_parser import parse_responses_stream, video_segmentation_format
 from openai import AsyncOpenAI, OpenAI
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from strobophone.calibration import scale_from_reference  # noqa: E402
+from strobophone.pipeline import measure_free_fall  # noqa: E402
+from strobophone.synthetic import FreeFallTruth, make_free_fall_video  # noqa: E402
+
 OUT = ROOT / "outputs" / "smoke"
 BASE_URL = "https://api.meta.ai/v1"
 SPARK = "muse-spark-1.3"
 SAM = "sam-3.1"
 VOICE = "muse-voice-transcribe-1.0"
-
-# Synthetic free fall: known scale and g, so the SAM fit has a ground truth.
-FPS = 120
-SCALE_PX_PER_M = 300.0
-G_TRUE = 9.81
-BALL_RADIUS_M = 0.04
-REST_FRAMES = 15
-FALL_S = 0.5
-WIDTH, HEIGHT = 480, 520
-Y0_PX = 60.0
 
 SPOKEN = "String length eighty centimetres. Hanging mass fifty grams. Frequency one hundred hertz."
 
@@ -55,47 +50,6 @@ def key() -> str:
             "MODEL_API_KEY is not set. Put it in .env (gitignored) as MODEL_API_KEY=..."
         )
     return value
-
-
-def make_fall_video(path: Path) -> np.ndarray:
-    """Render an orange ball falling past an A4 sheet; return true centre y per frame."""
-    n_fall = int(FALL_S * FPS) + 1
-    t = np.arange(n_fall) / FPS
-    ys = np.concatenate(
-        [np.full(REST_FRAMES, Y0_PX), Y0_PX + 0.5 * G_TRUE * t**2 * SCALE_PX_PER_M]
-    )
-    cx = WIDTH * 0.6
-    r = BALL_RADIUS_M * SCALE_PX_PER_M
-    yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH]
-    wall = np.empty((HEIGHT, WIDTH, 3), np.float32)
-    wall[:] = (205, 200, 190)
-    wall += np.random.default_rng(0).normal(0, 4, wall.shape)  # light texture
-    a4_w, a4_h = 0.210 * SCALE_PX_PER_M, 0.297 * SCALE_PX_PER_M
-    ax, ay = WIDTH * 0.15, HEIGHT * 0.35
-    wall[(xx >= ax) & (xx < ax + a4_w) & (yy >= ay) & (yy < ay + a4_h)] = (
-        250,
-        250,
-        248,
-    )
-
-    writer = imageio_ffmpeg.write_frames(
-        str(path),
-        (WIDTH, HEIGHT),
-        fps=FPS,
-        codec="libx264",
-        pix_fmt_out="yuv420p",
-        quality=8,
-        macro_block_size=8,
-    )
-    writer.send(None)
-    for y in ys:
-        frame = wall.copy()
-        d = np.sqrt((xx - cx) ** 2 + (yy - y) ** 2)
-        alpha = np.clip(r - d + 0.5, 0, 1)[..., None]  # antialiased edge
-        frame = frame * (1 - alpha) + np.array((240, 110, 20), np.float32) * alpha
-        writer.send(np.clip(frame, 0, 255).astype(np.uint8).tobytes())
-    writer.close()
-    return ys
 
 
 def make_speech_wav(path: Path) -> None:
@@ -254,43 +208,31 @@ async def sam_track(api_key: str, video: Path, concept: str):
                 return await parsed.final_result()
 
 
-def check_sam(api_key: str, video: Path, true_ys: np.ndarray) -> str:
+def check_sam(api_key: str, video: Path, truth: FreeFallTruth) -> str:
     result = asyncio.run(sam_track(api_key, video, "orange ball"))
     boxes = [r for r in result.records if r.kind == "box" and r.frame is not None]
-    save(
-        "sam_boxes.json",
-        [
-            {
-                "object_id": b.object_id,
-                "frame": b.frame.frame_index,
-                "l": b.left,
-                "t": b.top,
-                "r": b.right,
-                "b": b.bottom,
-                "c": b.confidence,
-            }
-            for b in boxes
-        ],
-    )
+    save("sam_boxes.json", [
+        {"object_id": b.object_id, "frame": b.frame.frame_index, "l": b.left, "t": b.top,
+         "r": b.right, "b": b.bottom, "c": b.confidence}
+        for b in boxes
+    ])
     if result.outcome.status != "completed" or not boxes:
         return f"FAILED: outcome {result.outcome.status}, {len(boxes)} boxes, media {result.media}"
     ids = sorted({b.object_id for b in boxes})
     main = max(ids, key=lambda i: sum(b.object_id == i for b in boxes))
-    track = {
-        b.frame.frame_index: (b.top + b.bottom) / 2
-        for b in boxes
-        if b.object_id == main
-    }
-    frames = np.array(sorted(f for f in track if f >= REST_FRAMES))
-    y = np.array([track[f] for f in frames])
-    t = (frames - REST_FRAMES) / FPS
-    a2, _, _ = np.polyfit(t, y, 2)
-    g = 2 * a2 / SCALE_PX_PER_M
-    px_err = np.abs(y - true_ys[frames]).mean()
-    return (
-        f"{len(ids)} object(s), {len(track)}/{len(true_ys)} frames tracked | mean centre error "
-        f"{px_err:.2f} px | fitted g = {g:.3f} m/s^2 (true {G_TRUE}, error {100 * abs(g - G_TRUE) / G_TRUE:.2f}%)"
-    )
+    y = np.full(len(truth.ball_y_px), np.nan)
+    for b in boxes:
+        if b.object_id == main:
+            y[b.frame.frame_index] = (b.top + b.bottom) / 2
+    # Scale from the true A4 box here: this check isolates SAM's tracking quality.
+    _, _, w, h = truth.a4_box_px
+    m = measure_free_fall(y, truth.fps, scale_from_reference(w, h, "A4"))
+    tracked = ~np.isnan(y)
+    px_err = np.abs(y[tracked] - truth.ball_y_px[tracked]).mean()
+    err = 100 * abs(m.fit.g - truth.g) / truth.g
+    return (f"{len(ids)} object(s), {tracked.sum()}/{len(y)} frames tracked | mean centre error "
+            f"{px_err:.2f} px | g = {m.fit.g:.3f} m/s^2, 95% CI [{m.g_ci_with_scale[0]:.3f}, "
+            f"{m.g_ci_with_scale[1]:.3f}] (true {truth.g}, error {err:.2f}%)")
 
 
 def check_voice(api_key: str, wav: Path) -> str:
@@ -324,14 +266,14 @@ def main() -> None:
     wanted = set(sys.argv[1:]) or {"spark", "spark_video", "sam", "voice"}
 
     video, wav = OUT / "free_fall_synthetic.mp4", OUT / "spoken_params.wav"
-    true_ys = make_fall_video(video)
+    truth = make_free_fall_video(video)
     if "voice" in wanted:
         make_speech_wav(wav)
 
     checks = {
         "spark": lambda: check_spark(api_key),
         "spark_video": lambda: check_spark_video(api_key, video),
-        "sam": lambda: check_sam(api_key, video, true_ys),
+        "sam": lambda: check_sam(api_key, video, truth),
         "voice": lambda: check_voice(api_key, wav),
     }
     for name, fn in checks.items():
