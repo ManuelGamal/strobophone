@@ -6,3 +6,5 @@ python-dotenv==1.2.4
 requests==2.34.2
 pytest==9.2.0
 scipy==1.18.1
+huggingface_hub==2.4.0
+pillow==13.0.0
