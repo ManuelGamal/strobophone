@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from strobophone.bounce import find_bounces, measure_restitution
+from strobophone.bounce import fall_time_frames, find_bounces, g_from_time_of_flight, measure_restitution
 
 FPS = 30.0
 G_PX = 9.81 * 600  # px/s^2 at 600 px/m
@@ -83,3 +83,15 @@ def test_restitution_needs_a_bounce():
     t = np.arange(20) / FPS
     with pytest.raises(ValueError, match="bounce"):
         measure_restitution(100 + 0.5 * G_PX * t**2)
+
+
+def test_fall_time_from_release_vertex_to_impact_at_sub_frame_precision():
+    # bounce_track: rest=3, phase=0.37 -> release at frame 2.63; h = 800 px at G_PX.
+    t_release, t_impact = fall_time_frames(bounce_track(e=0.7))
+    assert t_release == pytest.approx(3 - 0.37, abs=0.05)
+    assert t_impact - t_release == pytest.approx(np.sqrt(2 * 800 / G_PX) * FPS, abs=0.05)
+
+
+def test_g_from_time_of_flight_needs_no_pixel_scale():
+    h_m = 800 / 600  # the drop height in metres (G_PX assumes 600 px/m)
+    assert g_from_time_of_flight(bounce_track(e=0.7, noise=0.3), h_m, FPS) == pytest.approx(9.81, rel=0.01)
