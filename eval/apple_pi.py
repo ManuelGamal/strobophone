@@ -82,7 +82,9 @@ def fit_g(y: np.ndarray, release: int, contact: int, fps: float, px_per_m: float
     return fit_free_fall((idx - release) / fps, y[idx], px_per_m)
 
 
-def evaluate_case(case: Path, refresh: bool) -> list[dict]:
+def matched_balls(case: Path, refresh: bool = False):
+    """(g_true, fps, frames, concept, balls, objs): SAM objects matched one-to-one to
+    the annotated balls, or objs=[] when the counts differ."""
     md = json.loads((case / "metadata.json").read_text(encoding="utf-8"))
     g_true, balls = parse_apple_pi_annotation(md["annotation"])
     video = case / "rgb" / "video.mp4"
@@ -94,8 +96,6 @@ def evaluate_case(case: Path, refresh: bool) -> list[dict]:
         if np.count_nonzero(~np.isnan(b[:, 3])) >= 4
         and np.nanmax(b[:, 3]) - np.nanmin(b[:, 3]) > MIN_SPAN_PX
     }
-    centroids = mask_centroids(np.load(case / "mask" / "maps.npz")["maps"])
-
     # Match SAM objects to annotated balls: by size when diameters differ, else left-to-right
     # (names say Left/Right, or the listed order -- an assumption for unnamed pairs).
     objs = sorted(
@@ -105,6 +105,22 @@ def evaluate_case(case: Path, refresh: bool) -> list[dict]:
         width = lambda b: np.nanmedian(b[:, 2] - b[:, 0])
         objs = sorted(objs, key=lambda kv: width(kv[1]))
         balls = sorted(balls, key=lambda b: b["d"])
+    return g_true, fps, frames, concept, balls, objs if len(objs) == len(balls) else []
+
+
+def real_cases() -> list[Path]:
+    return [
+        c
+        for c in sorted(DATA.iterdir())
+        if json.loads((c / "metadata.json").read_text(encoding="utf-8")).get(
+            "is_realworld"
+        )
+    ]
+
+
+def evaluate_case(case: Path, refresh: bool) -> list[dict]:
+    g_true, fps, frames, concept, balls, objs = matched_balls(case, refresh)
+    centroids = mask_centroids(np.load(case / "mask" / "maps.npz")["maps"])
     rows = []
     for ball, obj in zip(balls, objs) if len(objs) == len(balls) else []:
         oid, b = obj
@@ -166,7 +182,7 @@ def evaluate_case(case: Path, refresh: bool) -> list[dict]:
                 "ball": "+".join(b["name"] for b in balls),
                 "concept": concept,
                 "frames_tracked": 0,
-                "note": f"{len(moving)} moving SAM objects for {len(balls)} balls",
+                "note": f"SAM moving objects did not match the {len(balls)} annotated balls",
             }
         )
     return rows
