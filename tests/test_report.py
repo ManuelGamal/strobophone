@@ -41,3 +41,28 @@ def test_invented_number_is_flagged():
 def test_rounded_value_must_round_correctly():
     # 9.675 rounds to 9.68 (or 9.7), never to 9.66
     assert untraced_numbers("g = 9.66", FACTS) == ["9.66"]
+
+
+def test_facts_from_a_measurement_include_g_and_restitution(tmp_path):
+    import numpy as np
+
+    from strobophone.calibration import Scale
+    from strobophone.measure import measure_video
+    from strobophone.report import facts_for
+    from tests.test_measure import make_free_fall_video
+    from tests.test_bounce import bounce_track
+
+    path = tmp_path / "big.mp4"
+    make_free_fall_video(path, ball_radius_m=0.06)
+
+    def bouncing(video, concept, n):
+        y = np.full(n, np.nan)
+        tr = bounce_track(e=0.7)[:n]
+        y[: len(tr)] = tr
+        return {"0": np.column_stack([np.full(n, 100.0), y - 5, np.full(n, 110.0), y + 5])}
+
+    m = measure_video(path, tmp_path, Scale(600.0, 0.0), bouncing)
+    f = facts_for(m, Scale(600.0, 0.0))
+    assert f["g"].value == pytest.approx(m.result.fit.g)
+    assert f["e"].shown == f"{m.restitution.e:.3f}"
+    assert f["n_arcs"].value == len(m.result.segments)

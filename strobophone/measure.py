@@ -68,6 +68,8 @@ def measure_video(
     y = (boxes[:, 1] + boxes[:, 3]) / 2
     result = measure_free_fall(y, fps, scale)
     lo, hi = result.g_ci_with_scale
+    for w in result.warnings:
+        log("warning: " + w)
     try:
         restitution = measure_restitution(y)
         log(f"restitution e = {restitution.e:.3f}, 95% CI [{restitution.ci[0]:.3f}, {restitution.ci[1]:.3f}]")

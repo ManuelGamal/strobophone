@@ -22,7 +22,6 @@ NOT_NUMBERS = [
     r"²",
     r"SAM\s?3\.1",
     r"Muse Spark(?:\s?1\.3)?",
-    r"95\s?%\s?(?:CI|confidence)",
     r"A4",
 ]
 G_REFERENCE = 9.79  # local g in Cairo (latitude 30 N), for comparison only
@@ -176,6 +175,19 @@ def facts_for(m, scale) -> dict[str, Fact]:
             "duration of the fitted fall",
         ),
     ]
+    inside = "inside" if lo <= G_REFERENCE <= hi else "outside"
+    items.append(("ci_level", 95, "95%", "convention", "confidence level of every interval"))
+    items.append(("ref_vs_ci", inside, inside, "report.facts_for", "whether the reference g lies inside or outside the 95% interval"))
+    consistency = "the arcs disagree beyond their errors, so the interval was widened" if r.warnings else "consistent"
+    items.append(("arc_consistency", consistency, consistency, "measure_free_fall", "whether the per-arc g values agree"))
+    items.append(("n_arcs", len(r.segments), str(len(r.segments)), "measure_free_fall", "ballistic arcs fitted jointly (drop and rebounds)"))
+    if m.restitution is not None:
+        e, (elo, ehi) = m.restitution.e, m.restitution.ci
+        items += [
+            ("e", e, f"{e:.3f}", "measure_restitution", "coefficient of restitution at the first bounce"),
+            ("e_ci_low", elo, f"{elo:.3f}", "measure_restitution", "95% CI lower bound of e"),
+            ("e_ci_high", ehi, f"{ehi:.3f}", "measure_restitution", "95% CI upper bound of e"),
+        ]
     return {i: Fact(i, v, s, src, lab) for i, v, s, src, lab in items}
 
 

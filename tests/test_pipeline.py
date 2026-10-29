@@ -113,3 +113,25 @@ def test_g_ci_coverage_when_held_frames_jitter():
         m = measure_free_fall(bounce_track(e=0.7, noise=1.5, seed=k, phase=(k * 0.37) % 1, rest=8), FPS, Scale(600.0, 0.0))
         hits += m.fit.ci_low <= G_PX / 600 <= m.fit.ci_high
     assert hits / 80 >= 0.88
+
+
+def test_consistent_arcs_pass_the_check_without_inflation():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, bounce_track
+
+    m = measure_free_fall(bounce_track(e=0.7, n_bounces=3, noise=0.5), FPS, Scale(600.0, 0.0))
+    assert m.warnings == []
+    assert m.g_ci_with_scale == pytest.approx((m.fit.ci_low, m.fit.ci_high))
+
+
+def test_arcs_that_disagree_widen_the_interval_and_warn():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, G_PX, bounce_track
+
+    y = bounce_track(e=0.8, n_bounces=3, noise=0.5)
+    # distort the tall part of the frame, as perspective or a wide lens would
+    y = y + 2e-4 * (y - 900.0) ** 2
+    m = measure_free_fall(y, FPS, Scale(600.0, 0.0))
+    assert m.warnings and "arcs disagree" in m.warnings[0]
+    lo, hi = m.g_ci_with_scale
+    assert hi - lo > 3 * (m.fit.ci_high - m.fit.ci_low)

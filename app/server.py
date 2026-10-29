@@ -74,6 +74,9 @@ def _result_json(m, scale: Scale) -> dict:
                 ).tolist(),
             },
         },
+        "warnings": r.warnings,
+        "arc_g": [list(a) for a in r.arc_g],
+        "birge_ratio": r.birge_ratio,
         "restitution": None
         if m.restitution is None
         else {"e": m.restitution.e, "ci": list(m.restitution.ci)},

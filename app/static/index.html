@@ -60,6 +60,9 @@
   button { min-height: 44px; width: 100%; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink);
            font: 600 15px var(--sans); cursor: pointer; }
   button:disabled { opacity: .45; cursor: not-allowed; }
+  .credit { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .warn { border-left: 3px solid var(--bad); background: var(--surface-2); padding: 8px 12px; margin: 16px 0 0; border-radius: 0 var(--radius) var(--radius) 0; font-size: 14px; }
+  .warn strong { color: var(--bad); }
   .log { font: 13px/1.6 var(--mono); background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; min-height: 120px;
          max-height: 260px; overflow-y: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .log .err { color: var(--bad); }
@@ -139,6 +142,7 @@
               <div class="ref">reference 9.79 m/s² (Cairo)</div>
             </div>
           </div>
+          <div id="warnings"></div>
           <dl class="facts" id="facts"></dl>
         </div>
       </section>
@@ -150,6 +154,7 @@
           <canvas id="overlay" aria-hidden="true"></canvas>
         </div>
         <p class="hint">Boxes are the tracker's output in each frame; frames used in the fit are drawn solid.</p>
+        <p class="credit" id="credit" hidden></p>
       </section>
 
       <section class="panel" id="plot-panel" aria-labelledby="plot-h" hidden>
@@ -226,7 +231,7 @@ async function poll(id) {
   for (;;) {
     const job = await (await fetch(`api/jobs/${id}`)).json();
     setLog(job.log, job.status, job.error);
-    if (job.status === "done") return show(id, job.result);
+    if (job.status === "done") return show(`api/jobs/${id}/video`, job.result);
     if (job.status === "failed") return;
     await new Promise((r) => setTimeout(r, 700));
   }
@@ -234,11 +239,16 @@ async function poll(id) {
 
 const fmt = (x, d = 3) => x.toFixed(d);
 
-function show(id, res) {
+function show(videoUrl, res, credit) {
   current = res;
+  $("credit").hidden = !credit; $("credit").textContent = credit ? "Clip: " + credit : "";
   $("empty").hidden = true; $("result").hidden = false;
   $("g").innerHTML = `${fmt(res.g, 2)}<small>m/s²</small>`;
   $("ci").textContent = `95% CI [${fmt(res.ci[0])}, ${fmt(res.ci[1])}]`;
+  $("warnings").replaceChildren(...(res.warnings || []).map((w) => {
+    const p = document.createElement("p"); p.className = "warn"; p.setAttribute("role", "status");
+    const b = document.createElement("strong"); b.textContent = "Check the setup: "; p.append(b, w); return p;
+  }));
   const p = res.prep;
   const facts = [
     ["frame rate", `${res.fps.toFixed(res.fps % 1 ? 2 : 0)} fps${p.parity ? " (fields)" : ""}`],
@@ -258,7 +268,7 @@ function show(id, res) {
   }));
   $("viewer-panel").hidden = false; $("plot-panel").hidden = false;
   const player = $("player");
-  player.src = `api/jobs/${id}/video`;
+  player.src = videoUrl;
   drawPlot(res);
   $("plot-summary").textContent = `${res.n_points} tracked points follow a parabola giving g = ${fmt(res.g)} m/s².`;
 }
