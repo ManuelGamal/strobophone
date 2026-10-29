@@ -1,0 +1,6 @@
+imageio-ffmpeg==0.7.0
+meta-sam-parser==0.1.0
+numpy==2.5.4
+openai==3.41.0
+python-dotenv==1.2.4
+requests==2.34.2
