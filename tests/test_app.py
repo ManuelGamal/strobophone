@@ -44,7 +44,9 @@ def test_upload_returns_g_with_track_and_fit_curve(clip, tmp_path):
     assert (
         len(res["track"]["t"]) == len(res["track"]["y"]) == len(res["track"]["boxes"])
     )
-    assert len(res["fit"]["t"]) == len(res["fit"]["y"]) > 10
+    curve = res["fit"]["curves"][0]
+    assert len(curve["t"]) == len(curve["y"]) > 10
+    assert len(res["fit"]["residuals"]["r"]) == res["n_points"]
     assert any("g =" in line for line in job["log"])
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from strobophone.baseline import read_video
+from strobophone.bounce import RestitutionResult, measure_restitution
 from strobophone.calibration import Scale
 from strobophone.pipeline import FreeFallMeasurement, measure_free_fall
 from strobophone.prep import Prep, prepare, track_with_fallbacks
@@ -28,6 +29,7 @@ class VideoMeasurement:
     boxes: np.ndarray  # (n, 4) l, t, r, b in original pixels, NaN where untracked
     y_px: np.ndarray  # box centre y in original pixels
     result: FreeFallMeasurement
+    restitution: RestitutionResult | None  # first bounce, when the clip shows one
 
 
 def _default_tracker(video, concept, n_frames):
@@ -66,6 +68,11 @@ def measure_video(
     y = (boxes[:, 1] + boxes[:, 3]) / 2
     result = measure_free_fall(y, fps, scale)
     lo, hi = result.g_ci_with_scale
+    try:
+        restitution = measure_restitution(y)
+        log(f"restitution e = {restitution.e:.3f}, 95% CI [{restitution.ci[0]:.3f}, {restitution.ci[1]:.3f}]")
+    except ValueError:
+        restitution = None
     log(f"g = {result.fit.g:.3f} m/s^2, 95% CI [{lo:.3f}, {hi:.3f}] from {result.fit.n_points} points")
     return VideoMeasurement(
         prep,
@@ -77,4 +84,5 @@ def measure_video(
         boxes,
         y,
         result,
+        restitution,
     )

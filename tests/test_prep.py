@@ -61,9 +61,17 @@ def test_codec_flicker_specks_do_not_trigger_zoom(tmp_path):
 
 
 def test_prep_maps_boxes_back_to_original_pixels():
+    # ffmpeg's scaler aligns pixel edges, so pixel-centre coordinates map as
+    # x_original = (x_zoomed + 0.5) / zoom - 0.5, then shift by the crop origin.
     p = Prep(crop=(150, 0, 100, 480), zoom=4.0, parity=None)
     boxes = np.array([[40.0, 400.0, 80.0, 440.0]])
-    np.testing.assert_allclose(p.to_original(boxes), [[160.0, 100.0, 170.0, 110.0]])
+    np.testing.assert_allclose(p.to_original(boxes), [[159.625, 99.625, 169.625, 109.625]])
+
+
+def test_object_sam_can_already_see_is_not_zoomed(tmp_path):
+    make_free_fall_video(tmp_path / "mid.mp4", ball_radius_m=0.035)  # ~21 px ball
+    frames, _ = read_video(tmp_path / "mid.mp4")
+    assert plan_zoom(frames).zoom == 1
 
 
 def test_prep_identity_when_no_crop_or_zoom():

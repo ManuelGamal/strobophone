@@ -27,7 +27,9 @@ class Prep:
 
     def to_original(self, boxes: np.ndarray) -> np.ndarray:
         """Map (left, top, right, bottom) boxes from the prepared clip back to the original."""
-        b = np.asarray(boxes, float) / self.zoom
+        # ffmpeg's scaler aligns pixel edges: a pixel-centre coordinate x in the zoomed
+        # clip is (x + 0.5) / zoom - 0.5 in the cropped original.
+        b = (np.asarray(boxes, float) + 0.5) / self.zoom - 0.5
         if self.crop:
             b = b + np.array([self.crop[0], self.crop[1], self.crop[0], self.crop[1]])
         return b
@@ -45,14 +47,19 @@ def motion_roi(frames: np.ndarray, pad_px: int = 20) -> tuple[int, int, int, int
     if not len(xs):
         raise ValueError("nothing moves in the clip")
     height, width = frames.shape[1:3]
-    x0, y0 = max(xs.min() - pad_px, 0), max(ys.min() - pad_px, 0)
+    # Even origin and size: ffmpeg rounds crops down to even pixels for 4:2:0 chroma,
+    # and the box mapping back to the original must use the crop it really applied.
+    x0, y0 = max(xs.min() - pad_px, 0) // 2 * 2, max(ys.min() - pad_px, 0) // 2 * 2
     x1, y1 = min(xs.max() + pad_px, width - 1), min(ys.max() + pad_px, height - 1)
-    return int(x0), int(y0), int(x1 - x0 + 1), int(y1 - y0 + 1)
+    w, h = (x1 - x0 + 2) // 2 * 2, (y1 - y0 + 2) // 2 * 2
+    w, h = min(w, (width - x0) // 2 * 2), min(h, (height - y0) // 2 * 2)
+    return int(x0), int(y0), int(w), int(h)
 
 
-def plan_zoom(frames: np.ndarray, target_px: float = 32, max_zoom: float = 6) -> Prep:
+def plan_zoom(frames: np.ndarray, target_px: float = 32, max_zoom: float = 6, min_px: float = 16) -> Prep:
     """Crop to the moving region and zoom so the smallest moving object is about
-    `target_px` wide (SAM misses objects of a few pixels). No-op for large objects."""
+    `target_px` wide, but only when it is under `min_px`: SAM misses objects of a
+    few pixels, while zooming objects it already sees costs accuracy and upload size."""
     widths = []
     for m in _motion_masks(frames):
         lab, k = ndimage.label(m)
@@ -66,7 +73,7 @@ def plan_zoom(frames: np.ndarray, target_px: float = 32, max_zoom: float = 6) ->
         sizes = [w for w, area in blobs if area >= max(4, 0.1 * largest)]
         if sizes:
             widths.append(min(sizes))
-    if not widths:
+    if not widths or np.median(widths) >= min_px:
         return Prep(None, 1.0, None)
     zoom = min(max_zoom, math.ceil(target_px / float(np.median(widths))))
     if zoom <= 1:

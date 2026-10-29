@@ -95,3 +95,18 @@ def test_fall_time_from_release_vertex_to_impact_at_sub_frame_precision():
 def test_g_from_time_of_flight_needs_no_pixel_scale():
     h_m = 800 / 600  # the drop height in metres (G_PX assumes 600 px/m)
     assert g_from_time_of_flight(bounce_track(e=0.7, noise=0.3), h_m, FPS) == pytest.approx(9.81, rel=0.01)
+
+
+@pytest.mark.parametrize("noise", [1.0, 2.0])
+def test_jitter_while_held_is_not_a_bounce(noise):
+    for k in range(60):
+        b = find_bounces(bounce_track(e=0.55, noise=noise, seed=k, phase=(k * 0.37) % 1))
+        assert b and b[0] > 10, (k, b)
+
+
+def test_restitution_ci_coverage_with_pixel_jitter():
+    hits = 0
+    for k in range(80):
+        r = measure_restitution(bounce_track(e=0.75, noise=1.5, seed=k, phase=(k * 0.37) % 1), seed=k)
+        hits += r.ci[0] <= 0.75 <= r.ci[1]
+    assert hits / 80 >= 0.88

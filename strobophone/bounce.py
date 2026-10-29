@@ -7,8 +7,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import stats
 
-from strobophone.fits import detect_release
+from strobophone.fits import detect_release, trim_before_vertex
 
 BOOTSTRAP_SAMPLES = 2000
 
@@ -22,15 +23,16 @@ class RestitutionResult:
     n_after: int
 
 
-def find_bounces(y_px: np.ndarray, min_rise_px: float = 3.0) -> list[int]:
+def find_bounces(y_px: np.ndarray, min_rise_px: float = 3.0, min_drop_px: float = 15.0) -> list[int]:
     """Frame indices of the lowest point of each bounce (image y grows downward):
-    a local maximum of y that the ball clearly rises away from afterwards."""
+    a local maximum of y that the ball reached by falling at least `min_drop_px`
+    (so jitter while it is held does not count) and clearly rises away from."""
     y = np.asarray(y_px, float)
     valid = np.nonzero(~np.isnan(y))[0]
     bounces = []
     for k in range(1, len(valid) - 1):
         i, prev, nxt = valid[k], valid[k - 1], valid[k + 1]
-        if y[i] >= y[prev] and y[i] > y[nxt]:
+        if y[i] >= y[prev] and y[i] > y[nxt] and y[i] - np.nanmin(y[: i + 1]) >= min_drop_px:
             after = y[valid[k + 1 : k + 4]]
             if y[i] - after.min() >= min_rise_px:
                 bounces.append(int(i))
@@ -65,6 +67,8 @@ def _first_bounce(y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, in
     pre_valid = valid[valid <= hit]
     start = int(pre_valid[detect_release(y[pre_valid])])
     pre = valid[(valid >= start) & (valid < hit)]
+    if len(pre) > 4:
+        pre = trim_before_vertex(pre, y)
     post = valid[(valid > hit) & (valid < end)]
     if len(pre) < 3 or len(post) < 3:
         raise ValueError(f"need 3+ frames each side of the bounce, got {len(pre)} and {len(post)}")
@@ -78,10 +82,11 @@ def measure_restitution(y_px: np.ndarray, seed: int = 0) -> RestitutionResult:
     t, yy, after, n_pre, n_post = _first_bounce(np.asarray(y_px, float))
     e, t_c, fitted = _solve(t, yy, after)
     rng = np.random.default_rng(seed)
-    resid = yy - fitted
-    samples = [_solve(t, fitted + rng.choice(resid, len(resid)), after)[0] for _ in range(BOOTSTRAP_SAMPLES)]
-    lo, hi = np.percentile(samples, [2.5, 97.5])
-    return RestitutionResult(e, (float(lo), float(hi)), t_c, n_pre, n_post)
+    n = len(yy)
+    resid = (yy - fitted) * np.sqrt(n / (n - 5))  # 5 fitted parameters; see fits.fit_free_fall
+    samples = [_solve(t, fitted + rng.choice(resid, n), after)[0] for _ in range(BOOTSTRAP_SAMPLES)]
+    half = stats.t.ppf(0.975, n - 5) * float(np.std(samples, ddof=1))
+    return RestitutionResult(e, (e - half, e + half), t_c, n_pre, n_post)
 
 
 def fall_time_frames(y_px: np.ndarray) -> tuple[float, float]:

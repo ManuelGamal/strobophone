@@ -158,7 +158,7 @@
         <div class="legend" aria-hidden="true">
           <span><i class="pt" style="border:1.6px solid var(--trace)"></i>tracked, in fit</span>
           <span><i class="pt" style="border:1.6px solid var(--muted)"></i>tracked, not in fit</span>
-          <span><i style="border-color:var(--fit)"></i>fit  y = ½gt² + v₀t</span>
+          <span><i style="border-color:var(--fit)"></i>joint fit, one g for every arc</span>
         </div>
         <div id="resid"></div>
         <p class="sr" id="plot-summary"></p>
@@ -249,6 +249,8 @@ function show(id, res) {
     ["fit residual", `${fmt(res.residual_rms_px, 2)} px rms`],
     ["scale", `${fmt(res.scale.px_per_m, 1)} px/m ± ${fmt(100 * res.scale.rel_uncertainty, 1)}%`],
     ["fit-only CI", `[${fmt(res.fit_ci[0])}, ${fmt(res.fit_ci[1])}]`],
+    ["arcs fitted", String(res.fit.curves.length)],
+    ...(res.restitution ? [["restitution e", `${fmt(res.restitution.e)} [${fmt(res.restitution.ci[0])}, ${fmt(res.restitution.ci[1])}]`]] : []),
   ];
   $("facts").replaceChildren(...facts.map(([k, v]) => {
     const d = document.createElement("div");
@@ -329,25 +331,24 @@ function axes(svg, W, H, m, xr, yr, xlab, ylab, flipY) {
 }
 function drawPlot(res) {
   const ppm = res.scale.px_per_m, t0 = res.release_frame / res.fps;
-  const y0 = res.fit.y[0];
+  const y0 = res.fit.curves[0].y[0];
   const inFit = new Set(res.fit_frames);
   const pts = res.track.t.map((t, i) => ({ t: t - t0, d: res.track.y[i] == null ? null : (res.track.y[i] - y0) / ppm, fit: inFit.has(i), i }))
     .filter((p) => p.d != null && p.t >= -0.15);
-  const fit = res.fit.t.map((t, i) => ({ t: t - t0, d: (res.fit.y[i] - y0) / ppm }));
+  const curves = res.fit.curves.map((c) => c.t.map((t, i) => ({ t: t - t0, d: (c.y[i] - y0) / ppm })));
   // size the drawing to its box so labels stay ~11px on phones
   const W = Math.max(320, Math.min(720, $("plot").clientWidth || 640)), H = Math.round(W * 0.47), m = { l: 52, r: 12, t: 10, b: 34 };
   const tLo = Math.min(0, ...pts.map((p) => p.t)), tHi = Math.max(...pts.map((p) => p.t));
   const xr = [tLo - 0.03 * (tHi - tLo), tHi + 0.03 * (tHi - tLo)];
-  const yr = [Math.min(0, ...pts.map((p) => p.d)), Math.max(...pts.map((p) => p.d), ...fit.map((p) => p.d))];
+  const ds = pts.map((p) => p.d).concat(curves.flat().map((p) => p.d));
+  const yr = [Math.min(0, ...ds), Math.max(...ds)];
   const svg = el("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-labelledby": "plot-h" });
   const { x, y } = axes(svg, W, H, m, xr, yr, "time since release (s)", "fall (m)", true);
-  el("path", { d: fit.map((p, k) => `${k ? "L" : "M"}${x(p.t)},${y(p.d)}`).join(""), fill: "none", stroke: "var(--fit)", "stroke-width": 2 }, svg);
+  for (const c of curves) el("path", { d: c.map((p, k) => `${k ? "L" : "M"}${x(p.t)},${y(p.d)}`).join(""), fill: "none", stroke: "var(--fit)", "stroke-width": 2 }, svg);
   for (const p of pts) el("circle", { cx: x(p.t), cy: y(p.d), r: 3.4, fill: "none", "stroke-width": 1.6, stroke: p.fit ? "var(--trace)" : "var(--muted)", opacity: p.fit ? 1 : .7 }, svg);
   $("plot").replaceChildren(svg);
 
-  // residuals in px against the fit polynomial (fit coords: t since release)
-  const c = res.fit.coeffs;
-  const rs = pts.filter((p) => p.fit).map((p) => ({ t: p.t, r: res.track.y[p.i] - (c[0] * p.t ** 2 + c[1] * p.t + c[2]) }));
+  const rs = res.fit.residuals.t.map((t, i) => ({ t: t - t0, r: res.fit.residuals.r[i] }));
   const H2 = 120, m2 = { l: 52, r: 12, t: 8, b: 26 };
   const lim = Math.max(1, ...rs.map((p) => Math.abs(p.r))) * 1.2;
   const svg2 = el("svg", { class: "plot", viewBox: `0 0 ${W} ${H2}`, role: "img", "aria-label": "fit residuals in pixels" });

@@ -41,7 +41,6 @@ def _nan_to_none(a) -> list:
 def _result_json(m, scale: Scale) -> dict:
     r = m.result
     t = np.arange(len(m.y_px)) / m.fps
-    t_fit = np.linspace(0, (r.fit_frames[-1] - r.release_frame) / m.fps, 60)
     return {
         "g": r.fit.g,
         "ci": list(r.g_ci_with_scale),
@@ -63,10 +62,21 @@ def _result_json(m, scale: Scale) -> dict:
             ],
         },
         "fit": {
-            "t": (t_fit + r.release_frame / m.fps).tolist(),
-            "y": np.polyval(r.fit.coeffs, t_fit).tolist(),
-            "coeffs": list(r.fit.coeffs),  # y(t since release) in px
+            # one curve per ballistic arc (drop, then rebounds), absolute time in s
+            "curves": [
+                {"t": (tt := np.linspace(seg[0], seg[-1], 40) / m.fps).tolist(), "y": np.polyval(c, tt).tolist()}
+                for seg, c in zip(r.segments, r.fit.arc_coeffs)
+            ],
+            "residuals": {
+                "t": (np.concatenate(r.segments) / m.fps).tolist(),
+                "r": np.concatenate(
+                    [m.y_px[seg] - np.polyval(c, seg / m.fps) for seg, c in zip(r.segments, r.fit.arc_coeffs)]
+                ).tolist(),
+            },
         },
+        "restitution": None
+        if m.restitution is None
+        else {"e": m.restitution.e, "ci": list(m.restitution.ci)},
     }
 
 

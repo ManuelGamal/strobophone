@@ -95,3 +95,15 @@ def test_release_detection_ignores_tracking_jitter_at_rest():
 def test_no_motion_is_rejected():
     with pytest.raises(ValueError, match="no motion"):
         detect_release(np.full(30, 60.0))
+
+
+def test_ci_keeps_95_percent_coverage_with_few_points():
+    # 30 fps, 1 m drop -> 13 points: the regime of ordinary phone video.
+    rng = np.random.default_rng(1)
+    t = np.arange(13) / 30
+    hits = 0
+    for k in range(300):
+        y = 100 + 0.5 * 9.81 * 500 * t**2 + rng.normal(0, 1.0, len(t))
+        r = fit_free_fall(t, y, 500.0, seed=k)
+        hits += r.ci_low <= 9.81 <= r.ci_high
+    assert hits / 300 >= 0.93

@@ -71,13 +71,45 @@ def test_fit_stops_at_the_first_bounce():
     assert m.fit.g == pytest.approx(G_PX / 600, rel=0.02)
 
 
-def test_measurement_exposes_the_fitted_curve_and_frames_for_plotting():
+def test_measurement_exposes_each_fitted_arc_for_plotting():
     from strobophone.calibration import Scale
     from tests.test_bounce import FPS, bounce_track
 
     y = bounce_track(e=0.7)
     m = measure_free_fall(y, FPS, Scale(600.0, 0.0))
-    assert m.fit_frames[0] == m.release_frame
-    assert len(m.fit_frames) == m.fit.n_points
-    t = (m.fit_frames - m.release_frame) / FPS
-    np.testing.assert_allclose(np.polyval(m.fit.coeffs, t), y[m.fit_frames], atol=0.5)
+    assert m.segments[0][0] == m.release_frame
+    assert sum(len(s) for s in m.segments) == m.fit.n_points
+    assert len(m.segments) == len(m.fit.arc_coeffs)
+    for seg, c in zip(m.segments, m.fit.arc_coeffs):
+        np.testing.assert_allclose(np.polyval(c, seg / FPS), y[seg], atol=0.5)
+
+
+def test_rebound_arcs_add_points_to_the_fit():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, G_PX, bounce_track
+
+    m = measure_free_fall(bounce_track(e=0.7, n_bounces=3), FPS, Scale(600.0, 0.0))
+    assert len(m.segments) >= 2
+    assert m.fit.g == pytest.approx(G_PX / 600, rel=1e-3)
+
+
+def test_g_from_rebound_arcs_when_the_drop_was_not_tracked():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, G_PX, bounce_track
+
+    y = bounce_track(e=0.7, n_bounces=3)
+    first_bounce = int(np.argmax(y[:30]))
+    y[: first_bounce - 1] = np.nan  # tracker missed the fast drop, as on Apple-PI 000052
+    m = measure_free_fall(y, FPS, Scale(600.0, 0.0))
+    assert m.fit.g == pytest.approx(G_PX / 600, rel=1e-3)
+
+
+def test_g_ci_coverage_when_held_frames_jitter():
+    from strobophone.calibration import Scale
+    from tests.test_bounce import FPS, G_PX, bounce_track
+
+    hits = 0
+    for k in range(80):
+        m = measure_free_fall(bounce_track(e=0.7, noise=1.5, seed=k, phase=(k * 0.37) % 1, rest=8), FPS, Scale(600.0, 0.0))
+        hits += m.fit.ci_low <= G_PX / 600 <= m.fit.ci_high
+    assert hits / 80 >= 0.88

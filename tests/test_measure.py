@@ -67,3 +67,36 @@ def test_each_attempt_outcome_is_logged_before_the_next_attempt(small_ball, tmp_
     lines = []
     measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"white ball"}), log=lines.append)
     assert lines.index("'ball': nothing found") < lines.index("asking SAM 3.1 for 'white ball'")
+
+
+def test_zoomed_track_maps_back_without_offset(tmp_path):
+    # ball at an odd x so a naive crop starts on an odd pixel (ffmpeg rounds it to even)
+    path = tmp_path / "odd.mp4"
+    truth = make_free_fall_video(path, ball_radius_m=0.012, size=(488, 520))
+    m = measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"ball"}))
+    assert m.prep.zoom > 1
+    assert all(v % 2 == 0 for v in m.prep.crop)
+    x = (m.boxes[:, 0] + m.boxes[:, 2]) / 2
+    assert abs(np.nanmedian(x) - truth.ball_x_px) < 0.3
+
+
+def test_restitution_is_reported_when_the_ball_bounces(tmp_path):
+    from tests.test_bounce import bounce_track
+
+    path = tmp_path / "big.mp4"
+    make_free_fall_video(path, ball_radius_m=0.06)  # large ball: no crop/zoom, identity mapping
+
+    def bouncing(video, concept, n_frames):
+        y = np.full(n_frames, np.nan)
+        track = bounce_track(e=0.7)[:n_frames]
+        y[: len(track)] = track
+        return {"0": np.column_stack([np.full(n_frames, 100.0), y - 5, np.full(n_frames, 110.0), y + 5])}
+
+    m = measure_video(path, tmp_path, Scale(600.0, 0.0), bouncing)
+    assert m.restitution.e == pytest.approx(0.7, abs=0.01)
+
+
+def test_no_restitution_without_a_bounce(small_ball, tmp_path):
+    path, truth = small_ball
+    m = measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"ball"}))
+    assert m.restitution is None
