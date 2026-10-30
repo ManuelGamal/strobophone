@@ -60,3 +60,17 @@ def test_small_angle_formula_would_be_badly_wrong_at_90_degrees():
     t, x, y = simulate(90)
     m = measure_pendulum(t, x, y, length_m=0.5)
     assert m.g_small_angle < 0.9 * 9.81  # naive 4 pi^2 L / T^2 underestimates by >10%
+
+
+def test_pendulum_video_end_to_end(tmp_path):
+    """Synthetic clip -> clip prep + tracking (colour stand-in for SAM) -> g."""
+    from strobophone.measure import horizontal_span, track_video
+    from strobophone.synthetic import make_pendulum_video
+    from tests.test_measure import colour_tracker
+
+    truth = make_pendulum_video(tmp_path / "pendulum.mp4", theta0_deg=45)
+    tr = track_video(tmp_path / "pendulum.mp4", tmp_path, colour_tracker({"ball"}), pick=horizontal_span)
+    x, y = (tr.boxes[:, 0] + tr.boxes[:, 2]) / 2, (tr.boxes[:, 1] + tr.boxes[:, 3]) / 2
+    m = measure_pendulum(np.arange(len(x)) / tr.fps, x, y, length_m=truth.length_m)
+    assert m.g == pytest.approx(truth.g, rel=0.005)
+    assert m.ci[0] < truth.g < m.ci[1]
