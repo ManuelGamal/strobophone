@@ -73,3 +73,33 @@ def test_scale_is_required(clip, tmp_path):
     path, _ = clip
     client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path))
     assert upload(client, path).status_code == 422
+
+
+@pytest.fixture(scope="module")
+def pendulum_clip(tmp_path_factory):
+    from strobophone.synthetic import make_pendulum_video
+
+    path = tmp_path_factory.mktemp("p") / "pendulum.mp4"
+    return path, make_pendulum_video(path, theta0_deg=30)
+
+
+def test_pendulum_upload_needs_only_the_string_length(pendulum_clip, tmp_path):
+    path, truth = pendulum_clip
+    client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path))
+    r = upload(client, path, experiment="pendulum", length_m=str(truth.length_m))
+    assert r.status_code == 202
+    job = wait(client, r.json()["id"], timeout_s=120)
+    assert job["status"] == "done", job
+    res = job["result"]
+    assert res["experiment"] == "pendulum"
+    assert res["g"] == pytest.approx(truth.g, rel=0.005)
+    assert res["ci"][0] < truth.g < res["ci"][1]
+    assert len(res["periods"]) == res["n_cycles"] >= 3
+    assert len(res["track"]["t"]) == len(res["track"]["x"]) == len(res["track"]["boxes"])
+    assert len(res["theta"]["t"]) == len(res["theta"]["deg"])
+
+
+def test_pendulum_needs_a_length(pendulum_clip, tmp_path):
+    path, _ = pendulum_clip
+    client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path))
+    assert upload(client, path, experiment="pendulum").status_code == 422

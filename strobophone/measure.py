@@ -16,6 +16,7 @@ from strobophone.pipeline import FreeFallMeasurement, measure_free_fall
 from strobophone.prep import Prep, prepare, track_with_fallbacks
 
 CONCEPTS = ("ball", "white ball", "sphere", "round object", "circle")
+PENDULUM_CONCEPTS = ("pendulum bob", "ball", "weight", "sphere", "round object")
 
 
 @dataclass(frozen=True)

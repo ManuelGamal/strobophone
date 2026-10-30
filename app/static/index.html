@@ -103,6 +103,11 @@
     <div class="stack">
       <form id="form" class="panel stack" novalidate>
         <h2>1 · Clip</h2>
+        <fieldset>
+          <legend>Experiment</legend>
+          <label class="choice"><input type="radio" name="experiment" value="free_fall" checked> Free fall (g from a drop)</label>
+          <label class="choice"><input type="radio" name="experiment" value="pendulum"> Pendulum (g from the period)</label>
+        </fieldset>
         <div>
           <label class="drop" id="drop">
             <input type="file" id="video" name="video" accept="video/*" required>
@@ -110,7 +115,7 @@
           </label>
           <p class="hint">Side-on, camera still, under 20 s. Slow motion gives a sharper result.</p>
         </div>
-        <fieldset>
+        <fieldset id="scale-field">
           <legend>Scale</legend>
           <label class="choice"><input type="radio" name="scale" value="A4" checked> A4 sheet in the fall plane</label>
           <label class="choice"><input type="radio" name="scale" value="px"> Known pixels per metre</label>
@@ -120,6 +125,11 @@
             <p class="hint" id="px-hint">In pixels of the original video.</p>
           </div>
         </fieldset>
+        <div id="length-field" hidden>
+          <label for="length_m">String length (m)</label>
+          <input type="number" id="length_m" min="0.05" max="5" step="any" placeholder="e.g. 0.50" aria-describedby="length-hint">
+          <p class="hint" id="length-hint">Pivot to the centre of the bob. No scale needed: g comes from the period.</p>
+        </div>
         <button id="run" type="submit" disabled>Measure g</button>
         <p class="hint" id="form-error" role="alert"></p>
       </form>
@@ -160,7 +170,7 @@
       <section class="panel" id="plot-panel" aria-labelledby="plot-h" hidden>
         <h2 id="plot-h">Fall distance vs time</h2>
         <div id="plot"></div>
-        <div class="legend" aria-hidden="true">
+        <div class="legend" id="legend" aria-hidden="true">
           <span><i class="pt" style="border:1.6px solid var(--trace)"></i>tracked, in fit</span>
           <span><i class="pt" style="border:1.6px solid var(--muted)"></i>tracked, not in fit</span>
           <span><i style="border-color:var(--fit)"></i>joint fit, one g for every arc</span>
@@ -176,6 +186,7 @@
 const $ = (id) => document.getElementById(id);
 const form = $("form"), fileInput = $("video"), runBtn = $("run"), logEl = $("log");
 let current = null;
+const LEGEND = $("legend").innerHTML;
 
 fileInput.addEventListener("change", () => {
   const f = fileInput.files[0];
@@ -191,6 +202,11 @@ drop.addEventListener("drop", (ev) => {
 });
 form.addEventListener("change", (ev) => {
   if (ev.target.name === "scale") $("px-field").hidden = ev.target.value !== "px";
+  if (ev.target.name === "experiment") {
+    const pend = ev.target.value === "pendulum";
+    $("scale-field").hidden = pend; $("length-field").hidden = !pend;
+    $("file-name").textContent = fileInput.files[0] ? $("file-name").textContent : pend ? "Choose or drop a video of a swinging pendulum" : "Choose or drop a video of a falling ball";
+  }
 });
 
 function setLog(lines, status, error) {
@@ -207,8 +223,13 @@ form.addEventListener("submit", async (ev) => {
   $("form-error").textContent = "";
   const data = new FormData();
   data.append("video", fileInput.files[0]);
+  const experiment = form.querySelector("input[name=experiment]:checked").value;
   const mode = form.querySelector("input[name=scale]:checked").value;
-  if (mode === "px") {
+  if (experiment === "pendulum") {
+    const L = parseFloat($("length_m").value);
+    if (!(L >= 0.05 && L <= 5)) { $("form-error").textContent = "Enter the string length in metres (0.05 to 5), pivot to bob centre."; $("length_m").focus(); return; }
+    data.append("experiment", "pendulum"); data.append("length_m", L);
+  } else if (mode === "px") {
     const v = parseFloat($("px_per_m").value);
     if (!(v > 0)) { $("form-error").textContent = "Enter the scale in pixels per metre, or choose the A4 sheet."; $("px_per_m").focus(); return; }
     data.append("px_per_m", v);
@@ -250,6 +271,7 @@ function show(videoUrl, res, credit) {
     const b = document.createElement("strong"); b.textContent = "Check the setup: "; p.append(b, w); return p;
   }));
   const p = res.prep;
+  if (res.experiment === "pendulum") return showPendulum(videoUrl, res, p);
   const facts = [
     ["frame rate", `${res.fps.toFixed(res.fps % 1 ? 2 : 0)} fps${p.parity ? " (fields)" : ""}`],
     ["field order", p.parity || "progressive"],
@@ -262,15 +284,57 @@ function show(videoUrl, res, credit) {
     ["arcs fitted", String(res.fit.curves.length)],
     ...(res.restitution ? [["restitution e", `${fmt(res.restitution.e)} [${fmt(res.restitution.ci[0])}, ${fmt(res.restitution.ci[1])}]`]] : []),
   ];
-  $("facts").replaceChildren(...facts.map(([k, v]) => {
-    const d = document.createElement("div");
-    d.innerHTML = `<dt></dt><dd></dd>`; d.firstChild.textContent = k; d.lastChild.textContent = v; return d;
-  }));
+  setFacts(facts);
+  $("plot-h").textContent = "Fall distance vs time"; $("legend").innerHTML = LEGEND;
   $("viewer-panel").hidden = false; $("plot-panel").hidden = false;
   const player = $("player");
   player.src = videoUrl;
   drawPlot(res);
   $("plot-summary").textContent = `${res.n_points} tracked points follow a parabola giving g = ${fmt(res.g)} m/s².`;
+}
+
+function setFacts(facts) {
+  $("facts").replaceChildren(...facts.map(([k, v]) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<dt></dt><dd></dd>`; d.firstChild.textContent = k; d.lastChild.textContent = v; return d;
+  }));
+}
+
+function showPendulum(videoUrl, res, p) {
+  const T = res.periods, mean = T.reduce((a, b) => a + b, 0) / T.length;
+  setFacts([
+    ["frame rate", `${res.fps.toFixed(res.fps % 1 ? 2 : 0)} fps${p.parity ? " (fields)" : ""}`],
+    ["concept", `"${res.concept}"`],
+    ["full swings", String(res.n_cycles)],
+    ["mean period", `${fmt(mean, 4)} s`],
+    ["first amplitude", `${fmt(res.amplitudes_deg[0], 1)}°`],
+    ["uncorrected g", `${fmt(res.g_small_angle)} m/s²`],
+    ["zoom for SAM", p.zoom > 1 ? `${p.zoom}× on ${p.crop[2]}×${p.crop[3]} px` : "none"],
+  ]);
+  $("plot-h").textContent = "Swing angle vs time";
+  $("legend").textContent = "Lower strip: period of each full swing. It shortens as the swing dies down; the amplitude correction removes that effect.";
+  $("viewer-panel").hidden = false; $("plot-panel").hidden = false;
+  $("player").src = videoUrl;
+  drawPendulumPlot(res);
+  $("plot-summary").textContent = `${res.n_cycles} full swings with mean period ${fmt(mean, 4)} s give g = ${fmt(res.g)} m/s².`;
+}
+
+function drawPendulumPlot(res) {
+  const pts = res.theta.t.map((t, i) => ({ t, a: res.theta.deg[i] })).filter((q) => q.a != null);
+  const W = Math.max(320, Math.min(720, $("plot").clientWidth || 640)), H = Math.round(W * 0.42), m = { l: 52, r: 12, t: 10, b: 34 };
+  const lim = Math.max(...pts.map((q) => Math.abs(q.a))) * 1.08;
+  const xr = [0, pts[pts.length - 1].t];
+  const svg = el("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-labelledby": "plot-h" });
+  const { x, y } = axes(svg, W, H, m, xr, [-lim, lim], "time (s)", "angle (°)", false);
+  el("path", { d: pts.map((q, k) => `${k ? "L" : "M"}${x(q.t)},${y(q.a)}`).join(""), fill: "none", stroke: "var(--trace)", "stroke-width": 1.6 }, svg);
+  $("plot").replaceChildren(svg);
+  // period of each full swing: a constant line would mean no amplitude effect
+  const T = res.periods, H2 = 120, m2 = { l: 52, r: 12, t: 8, b: 26 };
+  const lo = Math.min(...T), hi = Math.max(...T), pad = Math.max(1e-3, (hi - lo) * 0.3);
+  const svg2 = el("svg", { class: "plot", viewBox: `0 0 ${W} ${H2}`, role: "img", "aria-label": "period of each swing in seconds" });
+  const ax = axes(svg2, W, H2, m2, [0.5, T.length + 0.5], [lo - pad, hi + pad], "", "period (s)", false);
+  T.forEach((v, k) => el("circle", { cx: ax.x(k + 1), cy: ax.y(v), r: 3, fill: "var(--fit)" }, svg2));
+  $("resid").replaceChildren(svg2);
 }
 
 // ---- overlay: the tracked box for the frame on screen ----
@@ -287,7 +351,8 @@ function drawOverlay() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
   const i = Math.min(current.track.boxes.length - 1, Math.round(player.currentTime * current.fps));
-  const inFit = new Set(current.fit_frames);
+  const pend = current.experiment === "pendulum";
+  const inFit = pend ? { has: () => true } : new Set(current.fit_frames);
   const accent = getComputedStyle(document.documentElement).getPropertyValue("--fit").trim();
   // trail of centres up to now
   ctx.fillStyle = accent;
@@ -297,6 +362,12 @@ function drawOverlay() {
     ctx.beginPath(); ctx.arc(ox + (b[0] + b[2]) / 2 * s, oy + (b[1] + b[3]) / 2 * s, 2, 0, 7); ctx.fill();
   }
   const b = current.track.boxes[i];
+  if (pend && b) {
+    const [px, py] = current.pivot_px;
+    ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(ox + px * s, oy + py * s); ctx.lineTo(ox + (b[0] + b[2]) / 2 * s, oy + (b[1] + b[3]) / 2 * s); ctx.stroke();
+    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(ox + px * s, oy + py * s, 4, 0, 7); ctx.fill();
+  }
   if (b) {
     ctx.strokeStyle = accent; ctx.lineWidth = 2;
     ctx.setLineDash(inFit.has(i) ? [] : [5, 4]);
@@ -313,7 +384,7 @@ function loop() {
 player.addEventListener("loadeddata", () => { drawOverlay(); if ("requestVideoFrameCallback" in player) player.requestVideoFrameCallback(loop); });
 player.addEventListener("seeked", drawOverlay);
 player.addEventListener("timeupdate", () => { if (!("requestVideoFrameCallback" in player)) drawOverlay(); });
-window.addEventListener("resize", () => { drawOverlay(); if (current) drawPlot(current); });
+window.addEventListener("resize", () => { drawOverlay(); if (current) (current.experiment === "pendulum" ? drawPendulumPlot : drawPlot)(current); });
 
 // ---- plot: fall distance (m) vs time (s), with residuals ----
 const NS = "http://www.w3.org/2000/svg";
@@ -325,7 +396,7 @@ function el(name, attrs, parent) {
 }
 function ticks(lo, hi, n = 5) {
   const step0 = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(step0));
-  const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= step0);
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= 0.8 * step0);  // 0.8: 40 deg range -> 20s, not one tick
   const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-12; v += step) out.push(+v.toFixed(10));
   return out;
 }

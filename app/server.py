@@ -24,7 +24,14 @@ from fastapi.staticfiles import StaticFiles
 
 from strobophone.baseline import find_white_sheet, read_video
 from strobophone.calibration import Scale, scale_from_reference
-from strobophone.measure import _default_tracker, measure_video
+from strobophone.measure import (
+    PENDULUM_CONCEPTS,
+    _default_tracker,
+    horizontal_span,
+    measure_video,
+    track_video,
+)
+from strobophone.pendulum import measure_pendulum
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024
@@ -83,6 +90,30 @@ def _result_json(m, scale: Scale) -> dict:
     }
 
 
+def _pendulum_json(tr, m) -> dict:
+    t = np.arange(len(tr.boxes)) / tr.fps
+    x, y = (tr.boxes[:, 0] + tr.boxes[:, 2]) / 2, (tr.boxes[:, 1] + tr.boxes[:, 3]) / 2
+    cx, cy = m.pivot_px
+    return {
+        "experiment": "pendulum",
+        "g": m.g,
+        "ci": list(m.ci),
+        "g_small_angle": m.g_small_angle,
+        "n_cycles": m.n_cycles,
+        "periods": m.periods,
+        "amplitudes_deg": np.degrees(m.amplitudes).tolist(),
+        "pivot_px": [cx, cy],
+        "length_px": m.length_px,
+        "fps": tr.fps,
+        "prep": {"crop": tr.prep.crop, "zoom": tr.prep.zoom, "parity": tr.prep.parity},
+        "concept": tr.concept,
+        "attempts": tr.attempts,
+        "track": {"t": t.tolist(), "x": _nan_to_none(x), "y": _nan_to_none(y), "boxes": _nan_to_none(tr.boxes)},
+        "theta": {"t": t.tolist(), "deg": _nan_to_none(np.degrees(np.arctan2(x - cx, y - cy)))},
+        "warnings": [],
+    }
+
+
 def create_app(
     tracker=_default_tracker, workdir: Path | None = None, max_jobs_per_day: int = 40
 ) -> FastAPI:
@@ -94,7 +125,12 @@ def create_app(
     lock = threading.Lock()
 
     def run(
-        job_id: str, video: Path, px_per_m: float | None, reference: str | None
+        job_id: str,
+        video: Path,
+        px_per_m: float | None,
+        reference: str | None,
+        experiment: str = "free_fall",
+        length_m: float | None = None,
     ) -> None:
         job = jobs[job_id]
         job["status"] = "running"
@@ -103,8 +139,21 @@ def create_app(
             frames, fps = read_video(video)
             if len(frames) / fps > MAX_SECONDS:
                 raise ValueError(
-                    f"clip is {len(frames) / fps:.1f} s; trim it to under {MAX_SECONDS:g} s around the drop"
+                    f"clip is {len(frames) / fps:.1f} s; trim it to under {MAX_SECONDS:g} s"
                 )
+            if experiment == "pendulum":
+                del frames
+                tr = track_video(video, video.parent, tracker, PENDULUM_CONCEPTS, log, pick=horizontal_span)
+                x, y = (tr.boxes[:, 0] + tr.boxes[:, 2]) / 2, (tr.boxes[:, 1] + tr.boxes[:, 3]) / 2
+                m = measure_pendulum(np.arange(len(x)) / tr.fps, x, y, length_m)
+                log(
+                    f"{m.n_cycles} swings, mean period {np.mean(m.periods):.4f} s, first amplitude "
+                    f"{np.degrees(m.amplitudes[0]):.1f} deg"
+                )
+                log(f"g = {m.g:.3f} m/s^2, 95% CI [{m.ci[0]:.3f}, {m.ci[1]:.3f}] (small-angle formula: {m.g_small_angle:.3f})")
+                job["result"] = _pendulum_json(tr, m)
+                job["status"] = "done"
+                return
             if reference:
                 _, _, w, h = find_white_sheet(frames[0])
                 scale = scale_from_reference(w, h, reference)
@@ -126,8 +175,15 @@ def create_app(
         video: UploadFile = File(...),
         px_per_m: float | None = Form(None),
         reference: str | None = Form(None),
+        experiment: str = Form("free_fall"),
+        length_m: float | None = Form(None),
     ):
-        if px_per_m is None and reference is None:
+        if experiment not in ("free_fall", "pendulum"):
+            raise HTTPException(422, "experiment must be free_fall or pendulum")
+        if experiment == "pendulum":
+            if length_m is None or not 0.05 <= length_m <= 5:
+                raise HTTPException(422, "give the string length in metres (pivot to bob centre), 0.05 to 5")
+        elif px_per_m is None and reference is None:
             raise HTTPException(
                 422, "give a scale: px_per_m, or a reference sheet (A4 or letter)"
             )
@@ -164,7 +220,7 @@ def create_app(
             "result": None,
             "error": None,
         }
-        runner.submit(run, job_id, path, px_per_m, reference)
+        runner.submit(run, job_id, path, px_per_m, reference, experiment, length_m)
         return {"id": job_id}
 
     @app.get("/api/jobs/{job_id}")
