@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -46,6 +47,19 @@ def main() -> None:
     print(f"StroboPhone (ToF): median g {np.median(tof):.2f}  IQR [{np.percentile(tof, 25):.2f}, {np.percentile(tof, 75):.2f}]  (n={len(tof)})")
     print(f"Spark answers within 25% of 9.8: {np.mean(np.abs(np.array(spark) - 9.8) < 2.45):.0%}; "
           f"within 25% of {9.81 * factor:.2f}: {np.mean(np.abs(np.array(spark) - 9.81 * factor) < 0.61):.0%}")
+    # Did Spark misreport what it saw to keep 9.8? Compare the fall duration it states
+    # ("impact at ~8 frames") with the tracked one (single-ball clips in tof.csv).
+    frames = {r["case"]: float(r["fall_frames"]) for r in csv.DictReader(open(OUT / "tof.csv", encoding="utf-8")) if r.get("fall_frames")}
+    ratio = []
+    for case, a in zip(cases, answers):
+        for b in a["answer"]["balls"]:
+            m = re.search(r"(?:impact|contact|land\w*|hit\w*|fall\w*)[^.]{0,40}?~?\s*(\d+(?:\.\d+)?)\s*frames", b["reasoning"], re.I)
+            m = m or re.search(r"(\d+(?:\.\d+)?)\s*frames", b["reasoning"])
+            if m and case.name in frames:
+                ratio.append(float(m.group(1)) / frames[case.name])
+    if ratio:
+        print(f"Spark's stated fall duration / tracked: median {np.median(ratio):.2f} "
+              f"IQR [{np.percentile(ratio, 25):.2f}, {np.percentile(ratio, 75):.2f}] on {len(ratio)} clips")
     print(f"tokens {tokens[0]:,} in / {tokens[1]:,} out (~${tokens[0] * 1.25e-6 + tokens[1] * 4.25e-6:.2f})")
 
 
