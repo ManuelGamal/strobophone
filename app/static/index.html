@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2315181a'/%3E%3Cg fill='%23fb923c'%3E%3Ccircle cx='16' cy='6' r='2.2'/%3E%3Ccircle cx='16' cy='12' r='2.6'/%3E%3Ccircle cx='16' cy='20' r='3'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #f4f5f2; --surface: #ffffff; --surface-2: #eceee9; --line: #d5d8d0;
@@ -90,6 +90,12 @@
   [hidden] { display: none !important; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  .report-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .report-controls select { min-height: 44px; }
+  .report-text { font-size: 16px; line-height: 1.75; margin: 16px 0 0; }
+  .report-text[dir="rtl"] { font-family: "IBM Plex Sans Arabic", var(--sans, sans-serif); font-size: 17px; }
+  .report-text mark { background: color-mix(in srgb, var(--trace) 16%, transparent); color: inherit; border-bottom: 2px solid var(--trace); padding: 0 2px; border-radius: 2px; unicode-bidi: isolate; direction: ltr; cursor: help; }
+  .report-meta { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
 </style>
 </head>
 <body>
@@ -162,6 +168,20 @@
         </div>
       </section>
 
+      <section class="panel" id="report-panel" aria-labelledby="report-h" hidden>
+        <h2 id="report-h">Lab report · Muse Spark</h2>
+        <div class="report-controls">
+          <label for="report-lang" class="sr">Report language</label>
+          <select id="report-lang">
+            <option value="en">English</option>
+            <option value="ar" lang="ar">العربية</option>
+          </select>
+          <button id="report-btn" type="button">Write the results section</button>
+        </div>
+        <p class="hint">Spark writes the words; StroboPhone's code fills in every number from the measurement, and drafts with any other number are blocked.</p>
+        <div id="report-out" aria-live="polite"></div>
+      </section>
+
       <section class="panel" id="viewer-panel" aria-labelledby="track-h" hidden>
         <h2 id="track-h">Tracking · SAM 3.1</h2>
         <div class="viewer">
@@ -190,7 +210,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const form = $("form"), fileInput = $("video"), runBtn = $("run"), logEl = $("log");
-let current = null;
+let current = null, currentJob = null;
 const LEGEND = $("legend").innerHTML;
 
 fileInput.addEventListener("change", () => {
@@ -260,7 +280,7 @@ async function poll(id) {
   for (;;) {
     const job = await (await fetch(`api/jobs/${id}`)).json();
     setLog(job.log, job.status, job.error);
-    if (job.status === "done") return show(`api/jobs/${id}/video`, job.result);
+    if (job.status === "done") { currentJob = id; return show(`api/jobs/${id}/video`, job.result); }
     if (job.status === "failed") return;
     await new Promise((r) => setTimeout(r, 700));
   }
@@ -279,6 +299,8 @@ function show(videoUrl, res, credit) {
     const b = document.createElement("strong"); b.textContent = "Check the setup: "; p.append(b, w); return p;
   }));
   const p = res.prep;
+  $("report-out").replaceChildren();
+  $("report-panel").hidden = res.experiment === "pendulum" || !currentJob;
   if (res.experiment === "pendulum") return showPendulum(videoUrl, res, p);
   const facts = [
     ["frame rate", `${res.fps.toFixed(res.fps % 1 ? 2 : 0)} fps${p.parity ? " (fields)" : ""}`],
@@ -344,6 +366,37 @@ function drawPendulumPlot(res) {
   T.forEach((v, k) => el("circle", { cx: ax.x(k + 1), cy: ax.y(v), r: 3, fill: "var(--fit)" }, svg2));
   $("resid").replaceChildren(svg2);
 }
+
+$("report-btn").addEventListener("click", async () => {
+  const btn = $("report-btn"), out = $("report-out"), lang = $("report-lang").value;
+  btn.disabled = true; btn.textContent = "Writing…";
+  out.replaceChildren(Object.assign(document.createElement("p"), { className: "report-meta", textContent: "Muse Spark is drafting; the checker verifies every number…" }));
+  try {
+    const r = await fetch(`api/jobs/${currentJob}/report`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: lang }) });
+    const rep = await r.json();
+    if (!r.ok) throw new Error(rep.detail || r.statusText);
+    const p = document.createElement("p");
+    p.className = "report-text";
+    if (lang === "ar") { p.dir = "rtl"; p.lang = "ar"; }
+    if (!rep.accepted) {
+      p.className = "warn";
+      p.textContent = `Blocked: after ${rep.revisions} revisions the draft still contained numbers no measurement explains (${rep.untraced.join(", ")}). Nothing is shown rather than an unverified report.`;
+      out.replaceChildren(p); return;
+    }
+    for (const seg of rep.segments) {
+      if (!seg.fact) { p.append(seg.text); continue; }
+      const m = document.createElement("mark");
+      m.textContent = seg.text; m.title = `${seg.label} · computed by ${seg.source}`;
+      p.append(m);
+    }
+    const n = rep.segments.filter((s) => s.fact).length;
+    const meta = Object.assign(document.createElement("p"), { className: "report-meta",
+      textContent: `${n} numbers, each filled in from the measurement (hover for its source). Checker passed${rep.revisions ? ` after ${rep.revisions} revision${rep.revisions > 1 ? "s" : ""}` : " on the first draft"}.` });
+    out.replaceChildren(p, meta);
+  } catch (e) {
+    out.replaceChildren(Object.assign(document.createElement("p"), { className: "warn", textContent: "Report failed: " + e.message }));
+  } finally { btn.disabled = false; btn.textContent = "Write the results section"; }
+});
 
 // ---- overlay: the tracked box for the frame on screen ----
 const player = $("player"), canvas = $("overlay"), ctx = canvas.getContext("2d");

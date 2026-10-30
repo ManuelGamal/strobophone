@@ -14,7 +14,7 @@ import imageio_ffmpeg
 import numpy as np
 from scipy import ndimage
 
-from strobophone.baseline import read_video
+from strobophone.baseline import iter_frames
 
 DIFF_THRESHOLD = 25  # grey levels; above codec noise, below a moving object's contrast
 
@@ -35,18 +35,61 @@ class Prep:
         return b
 
 
-def _motion_masks(frames: np.ndarray) -> np.ndarray:
-    grey = frames.astype(np.float32).mean(axis=-1)
-    return np.abs(np.diff(grey, axis=0)) > DIFF_THRESHOLD
+@dataclass(frozen=True)
+class Motion:
+    """What moves in a clip, gathered frame by frame (memory stays O(one frame))."""
+
+    widths: list[int]  # per frame pair: width of the smallest real mover (px)
+    moved: np.ndarray  # (H, W) bool: union of all frame-to-frame changes
+    centroid_y: np.ndarray  # per frame pair: mean row of the changed pixels
+    n_frames: int
 
 
-def motion_roi(frames: np.ndarray, pad_px: int = 20) -> tuple[int, int, int, int]:
+def _smallest_mover(mask: np.ndarray) -> int | None:
+    lab, _ = ndimage.label(mask)
+    blobs = [
+        (sl[1].stop - sl[1].start, np.count_nonzero(lab[sl] == i + 1))
+        for i, sl in enumerate(ndimage.find_objects(lab))
+    ]
+    # Codec flicker makes specks of a few pixels; keep blobs that are at least
+    # a tenth of the frame's largest mover so they don't pass for a tiny object.
+    largest = max((area for _, area in blobs), default=0)
+    sizes = [w for w, area in blobs if area >= max(4, 0.1 * largest)]
+    return min(sizes) if sizes else None
+
+
+def scan_motion(frames) -> Motion:
+    """`frames`: an array or any iterable of (H, W, 3) frames."""
+    prev, moved, widths, cy, n = None, None, [], [], 0
+    for frame in frames:
+        grey = frame.mean(axis=-1, dtype=np.float32)
+        n += 1
+        if prev is not None:
+            mask = np.abs(grey - prev) > DIFF_THRESHOLD
+            moved = mask if moved is None else moved | mask
+            ys = np.nonzero(mask)[0]
+            cy.append(ys.mean() if len(ys) else np.nan)
+            w = _smallest_mover(mask)
+            if w is not None:
+                widths.append(w)
+        prev = grey
+    if moved is None:
+        raise ValueError("the clip has fewer than two frames")
+    return Motion(widths, moved, np.array(cy), n)
+
+
+def _motion(frames) -> Motion:
+    return frames if isinstance(frames, Motion) else scan_motion(frames)
+
+
+def motion_roi(frames, pad_px: int = 20) -> tuple[int, int, int, int]:
     """Bounding box (x, y, w, h) of everything that moves during the clip, padded."""
-    moved = ndimage.binary_opening(_motion_masks(frames).any(axis=0), iterations=1)
+    union = _motion(frames).moved
+    moved = ndimage.binary_opening(union, iterations=1)
     ys, xs = np.nonzero(moved)
     if not len(xs):
         raise ValueError("nothing moves in the clip")
-    height, width = frames.shape[1:3]
+    height, width = union.shape
     # Even origin and size: ffmpeg rounds crops down to even pixels for 4:2:0 chroma,
     # and the box mapping back to the original must use the crop it really applied.
     x0, y0 = max(xs.min() - pad_px, 0) // 2 * 2, max(ys.min() - pad_px, 0) // 2 * 2
@@ -57,28 +100,17 @@ def motion_roi(frames: np.ndarray, pad_px: int = 20) -> tuple[int, int, int, int
 
 
 def plan_zoom(
-    frames: np.ndarray, target_px: float = 32, max_zoom: float = 6, min_px: float = 16, max_side_px: float = 3840
+    frames, target_px: float = 32, max_zoom: float = 6, min_px: float = 16, max_side_px: float = 3840
 ) -> Prep:
     """Crop to the moving region and zoom so the smallest moving object is about
     `target_px` wide, but only when it is under `min_px`: SAM misses objects of a
     few pixels, while zooming objects it already sees costs accuracy and upload size.
     The zoomed clip's long side stays within `max_side_px` (x264 fails on huge frames)."""
-    widths = []
-    for m in _motion_masks(frames):
-        lab, k = ndimage.label(m)
-        blobs = [
-            (sl[1].stop - sl[1].start, np.count_nonzero(lab[sl] == i + 1))
-            for i, sl in enumerate(ndimage.find_objects(lab))
-        ]
-        # Codec flicker makes specks of a few pixels; keep blobs that are at least
-        # a tenth of the frame's largest mover so they don't pass for a tiny object.
-        largest = max((area for _, area in blobs), default=0)
-        sizes = [w for w, area in blobs if area >= max(4, 0.1 * largest)]
-        if sizes:
-            widths.append(min(sizes))
+    motion = _motion(frames)
+    widths = motion.widths
     if not widths or np.median(widths) >= min_px:
         return Prep(None, 1.0, None)
-    crop = motion_roi(frames)
+    crop = motion_roi(motion)
     zoom = min(max_zoom, math.ceil(target_px / float(np.median(widths))), math.floor(max_side_px / max(crop[2:])))
     if zoom <= 1:
         return Prep(None, 1.0, None)
@@ -164,14 +196,6 @@ def is_interlaced(video: Path) -> bool:
     return counts["tff"] + counts["bff"] > counts["progressive"]
 
 
-def _motion_centroid_y(frames: np.ndarray) -> np.ndarray:
-    y = []
-    for m in _motion_masks(frames):
-        ys = np.nonzero(m)[0]
-        y.append(ys.mean() if len(ys) else np.nan)
-    return np.array(y)
-
-
 def prepare(video, workdir) -> tuple[Prep, Path, float]:
     """Deinterlace with the field order that gives a smooth track, then crop and
     zoom around the motion if the object is small. Returns (prep, clip, fps)."""
@@ -185,11 +209,11 @@ def prepare(video, workdir) -> tuple[Prep, Path, float]:
             out = _filter(
                 video, workdir / f"{video.stem}_{p}.mp4", [f"yadif=mode=1:parity={p}"]
             )
-            scores[p] = (zigzag_score(_motion_centroid_y(read_video(out)[0])), out)
+            scores[p] = (zigzag_score(scan_motion(iter_frames(out)[1]).centroid_y), out)
         parity = min(scores, key=lambda p: scores[p][0])
         clip = scores[parity][1]
-    frames, fps = read_video(clip)
-    zoomed = plan_zoom(frames)
+    fps, frames = iter_frames(clip)
+    zoomed = plan_zoom(scan_motion(frames))
     prep = Prep(zoomed.crop, zoomed.zoom, parity)
     if prep.crop:
         x, y, w, h = prep.crop

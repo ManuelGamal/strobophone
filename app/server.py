@@ -10,6 +10,7 @@ daily cap bounds the spend of the public demo).
 from __future__ import annotations
 
 import datetime as dt
+import os
 import shutil
 import tempfile
 import threading
@@ -17,12 +18,14 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import imageio_ffmpeg
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from strobophone.baseline import find_white_sheet, read_video
+from strobophone.baseline import find_white_sheet, first_frame
 from strobophone.calibration import Scale, scale_from_reference
 from strobophone.measure import (
     PENDULUM_CONCEPTS,
@@ -32,6 +35,7 @@ from strobophone.measure import (
     track_video,
 )
 from strobophone.pendulum import measure_pendulum
+from strobophone.report import LANGUAGES, facts_for, localize, segments, write_report
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024
@@ -114,8 +118,21 @@ def _pendulum_json(tr, m) -> dict:
     }
 
 
+class ReportRequest(BaseModel):
+    language: str = "en"
+
+
+def _spark_client():
+    from openai import OpenAI
+
+    return OpenAI(base_url="https://api.meta.ai/v1", api_key=os.environ["MODEL_API_KEY"])
+
+
 def create_app(
-    tracker=_default_tracker, workdir: Path | None = None, max_jobs_per_day: int = 40
+    tracker=_default_tracker,
+    workdir: Path | None = None,
+    max_jobs_per_day: int = 40,
+    report_client=None,
 ) -> FastAPI:
     app = FastAPI(title="StroboPhone")
     root = Path(workdir or tempfile.mkdtemp(prefix="strobophone_"))
@@ -123,6 +140,18 @@ def create_app(
     runner = ThreadPoolExecutor(max_workers=1)
     quota = {"day": dt.date.today(), "used": 0}
     lock = threading.Lock()
+    measured: dict[str, tuple] = {}  # job id -> (measurement, scale), for reports
+
+    def take_quota() -> None:
+        with lock:
+            if quota["day"] != dt.date.today():
+                quota.update(day=dt.date.today(), used=0)
+            if quota["used"] >= max_jobs_per_day:
+                raise HTTPException(
+                    429,
+                    "the demo's daily measurement budget is used up; try again tomorrow",
+                )
+            quota["used"] += 1
 
     def run(
         job_id: str,
@@ -137,13 +166,10 @@ def create_app(
         job["status"] = "running"
         log = job["log"].append
         try:
-            frames, file_fps = read_video(video)
-            if len(frames) / file_fps > MAX_SECONDS:
-                raise ValueError(
-                    f"clip is {len(frames) / file_fps:.1f} s; trim it to under {MAX_SECONDS:g} s"
-                )
+            _, seconds = imageio_ffmpeg.count_frames_and_secs(str(video))
+            if seconds > MAX_SECONDS:
+                raise ValueError(f"clip is {seconds:.1f} s; trim it to under {MAX_SECONDS:g} s")
             if experiment == "pendulum":
-                del frames
                 tr = track_video(
                     video, video.parent, tracker, PENDULUM_CONCEPTS, log, pick=horizontal_span, fps_override=fps
                 )
@@ -158,16 +184,16 @@ def create_app(
                 job["status"] = "done"
                 return
             if reference:
-                _, _, w, h = find_white_sheet(frames[0])
+                _, _, w, h = find_white_sheet(first_frame(video))
                 scale = scale_from_reference(w, h, reference)
                 log(
                     f"{reference} sheet {w:.0f} x {h:.0f} px -> {scale.px_per_m:.1f} px/m (+/-{100 * scale.rel_uncertainty:.1f}%)"
                 )
             else:
                 scale = Scale(px_per_m, 0.0)
-            del frames
             m = measure_video(video, video.parent, scale, tracker=tracker, log=log, fps_override=fps)
             job["result"] = _result_json(m, scale)
+            measured[job_id] = (m, scale)
             job["status"] = "done"
         except Exception as e:  # reported to the user, not swallowed
             job["error"] = str(e)
@@ -195,15 +221,7 @@ def create_app(
             )
         if reference is not None and reference not in ("A4", "letter"):
             raise HTTPException(422, "reference must be A4 or letter")
-        with lock:
-            if quota["day"] != dt.date.today():
-                quota.update(day=dt.date.today(), used=0)
-            if quota["used"] >= max_jobs_per_day:
-                raise HTTPException(
-                    429,
-                    "the demo's daily measurement budget is used up; try again tomorrow",
-                )
-            quota["used"] += 1
+        take_quota()
         job_id = uuid.uuid4().hex[:12]
         folder = root / job_id
         folder.mkdir(parents=True)
@@ -234,6 +252,26 @@ def create_app(
         if job_id not in jobs:
             raise HTTPException(404, "no such job")
         return jobs[job_id]
+
+    @app.post("/api/jobs/{job_id}/report")
+    def report(job_id: str, body: ReportRequest):
+        """Muse Spark drafts the results section with [[fact]] placeholders; code fills
+        in every number and blocks drafts with numbers it cannot trace to a tool."""
+        if job_id not in measured:
+            raise HTTPException(404, "no free-fall measurement with this id")
+        if body.language not in LANGUAGES:
+            raise HTTPException(422, f"language must be one of {', '.join(LANGUAGES)}")
+        take_quota()
+        m, scale = measured[job_id]
+        facts = localize(facts_for(m, scale), body.language)
+        r = write_report(facts, report_client or _spark_client(), language=body.language)
+        return {
+            "language": body.language,
+            "accepted": r.accepted,
+            "revisions": r.revisions,
+            "untraced": r.untraced,
+            "segments": segments(r.template, facts) if r.accepted else [],
+        }
 
     @app.get("/api/jobs/{job_id}/video")
     def job_video(job_id: str):

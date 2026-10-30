@@ -20,6 +20,21 @@ def read_video(path: Path) -> tuple[np.ndarray, float]:
     return np.stack(frames), float(meta["fps"])
 
 
+def iter_frames(path: Path):
+    """(fps, generator of (H, W, 3) uint8 RGB frames): one frame in memory at a time."""
+    reader = imageio_ffmpeg.read_frames(str(path))
+    meta = next(reader)
+    width, height = meta["size"]
+    return float(meta["fps"]), (np.frombuffer(buf, np.uint8).reshape(height, width, 3) for buf in reader)
+
+
+def first_frame(path: Path) -> np.ndarray:
+    _, frames = iter_frames(path)
+    frame = next(frames).copy()
+    frames.close()
+    return frame
+
+
 def track_colour(frames: np.ndarray, rgb: tuple[int, int, int], tol: float = 60.0) -> np.ndarray:
     """(N, 2) array of (x, y) centroids of pixels near `rgb`; NaN where the object is absent.
 

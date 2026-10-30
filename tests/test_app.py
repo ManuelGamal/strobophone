@@ -113,3 +113,37 @@ def test_stated_capture_rate_is_used(clip, tmp_path):
     assert job["status"] == "done", job
     assert job["result"]["g"] == pytest.approx(truth.g / 4, rel=0.01), job["log"]
     assert any("file says" in line for line in job["log"])
+
+
+def test_lab_report_in_arabic_traces_every_number(clip, tmp_path):
+    from tests.test_report import FakeClient
+
+    path, truth = clip
+    client = TestClient(
+        create_app(
+            tracker=colour_tracker({"ball"}),
+            workdir=tmp_path,
+            report_client=FakeClient("قيمة الجاذبية المقيسة [[g]] بفاصل ثقة من [[g_ci_low]] إلى [[g_ci_high]]."),
+        )
+    )
+    job = wait(client, upload(client, path, px_per_m=str(truth.px_per_m)).json()["id"])
+    r = client.post(f"/api/jobs/{job['id']}/report", json={"language": "ar"})
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["accepted"] and rep["language"] == "ar"
+    facts = [s for s in rep["segments"] if "fact" in s]
+    assert [s["fact"] for s in facts] == ["g", "g_ci_low", "g_ci_high"]
+    assert all(s["source"] for s in facts)
+
+
+def test_report_with_typed_numbers_is_blocked(clip, tmp_path):
+    from tests.test_report import FakeClient
+
+    path, truth = clip
+    bad = "g is close to the value 12.34 found elsewhere."
+    client = TestClient(
+        create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path, report_client=FakeClient(bad, bad, bad))
+    )
+    job = wait(client, upload(client, path, px_per_m=str(truth.px_per_m)).json()["id"])
+    rep = client.post(f"/api/jobs/{job['id']}/report", json={"language": "en"}).json()
+    assert not rep["accepted"] and rep["untraced"] == ["12.34"] and rep["segments"] == []

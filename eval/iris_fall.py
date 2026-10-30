@@ -44,6 +44,8 @@ def main() -> None:
     rows = []
     for folder, pkey in CLASSES.items():
         for clip in sorted((root / folder).rglob("*.mp4")):
+            if len(sys.argv) > 1 and not any(k in clip.as_posix() for k in sys.argv[1:]):
+                continue  # optional filters, e.g. pendulum_45/01
             rel = clip.relative_to(root)
             key = setting(rel, params[pkey])
             row = {"clip": str(rel), "setting": key}

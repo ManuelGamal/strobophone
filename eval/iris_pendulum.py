@@ -55,6 +55,8 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     rows = []
     for clip in sorted((root / "Pendulum").rglob("*.mp4")):
+        if len(sys.argv) > 1 and not any(k in clip.as_posix() for k in sys.argv[1:]):
+            continue  # optional filters, e.g. pendulum_45/01
         key = setting(clip.relative_to(root), params)
         row = {"clip": str(clip.relative_to(root)), "setting": key}
         if key is None:

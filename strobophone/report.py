@@ -8,6 +8,7 @@ for revision (or blocked) until it is clean.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from dataclasses import dataclass
@@ -24,6 +25,10 @@ NOT_NUMBERS = [
     r"Muse Spark(?:\s?1\.3)?",
     r"A4",
 ]
+# Arabic-Indic and Eastern Arabic digits (and the Arabic decimal separator) read as
+# ASCII, so a number typed in Arabic script is checked like any other.
+DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫", "01234567890123456789.")
+LANGUAGES = {"en": "English", "ar": "Modern Standard Arabic"}
 G_REFERENCE = 9.79  # local g in Cairo (latitude 30 N), for comparison only
 
 
@@ -47,6 +52,44 @@ def render(text: str, facts: dict[str, Fact]) -> str:
     return PLACEHOLDER.sub(sub, text)
 
 
+# Word-valued facts as they should read inside a report in each language.
+TRANSLATIONS = {
+    "ar": {
+        "progressive": "تقدمي (غير متشابك)",
+        "tff": "تشابك بالحقل العلوي أولاً",
+        "bff": "تشابك بالحقل السفلي أولاً",
+        "inside": "داخل",
+        "outside": "خارج",
+        "consistent": "متسقة",
+        "the arcs disagree beyond their errors, so the interval was widened": "الأقواس غير متسقة بما يتجاوز أخطاءها، لذا وُسّعت الفترة",
+    }
+}
+
+
+def localize(facts: dict[str, Fact], language: str) -> dict[str, Fact]:
+    """Facts whose value is a word, shown in the report's language; numbers untouched."""
+    words = TRANSLATIONS.get(language, {})
+    return {
+        k: dataclasses.replace(f, shown=words[f.shown]) if isinstance(f.value, str) and f.shown in words else f
+        for k, f in facts.items()
+    }
+
+
+def segments(text: str, facts: dict[str, Fact]) -> list[dict]:
+    """The rendered report as plain-text runs and fact runs, so a page can mark
+    every number with the tool it came from."""
+    out, pos = [], 0
+    for m in PLACEHOLDER.finditer(text):
+        if m.start() > pos:
+            out.append({"text": text[pos : m.start()]})
+        f = facts[m[1]]
+        out.append({"text": f.shown, "fact": f.id, "source": f.source, "label": f.label})
+        pos = m.end()
+    if pos < len(text):
+        out.append({"text": text[pos:]})
+    return out
+
+
 def _traced(token: str, facts: dict[str, Fact]) -> bool:
     x = float(token)
     decimals = len(token.split(".")[1]) if "." in token else 0
@@ -61,7 +104,7 @@ def _traced(token: str, facts: dict[str, Fact]) -> bool:
 
 def untraced_numbers(text: str, facts: dict[str, Fact]) -> list[str]:
     """Digits in `text` (outside placeholders, units, model names) that no fact explains."""
-    stripped = text
+    stripped = text.translate(DIGITS)
     for pattern in NOT_NUMBERS:
         stripped = re.sub(pattern, " ", stripped)
     return [
@@ -196,7 +239,7 @@ Rules:
 - Never type a digit. Cite every number as a placeholder [[fact_id]] from the fact list; it is replaced by the measured value.
 - Use only the facts given. Do not add textbook values, other experiments or numbers of your own.
 - Say plainly whether the reference value lies inside the 95% interval, and name the largest source of uncertainty you can identify from the facts.
-- Plain, precise English; 120-200 words; no headings, no lists."""
+- Plain, precise {language}; 120-200 words; no headings, no lists. Keep every placeholder exactly as written (do not translate the ids inside [[ ]])."""
 
 SCHEMA = {
     "type": "object",
@@ -255,11 +298,13 @@ def write_report(
     client,
     model: str = "muse-spark-1.3",
     max_revisions: int = 2,
+    language: str = "en",
 ) -> Report:
     """Spark drafts with placeholders; the checker sends it back until no untraced
     number or unknown placeholder remains, or blocks it after `max_revisions`."""
     user = "Facts (cite as placeholders):\n" + _fact_table(facts, with_values=True)
-    template = _ask(client, model, SYSTEM, user)
+    system = SYSTEM.format(language=LANGUAGES[language])
+    template = _ask(client, model, system, user)
     for revision in range(max_revisions + 1):
         problems = []
         unknown = [p for p in PLACEHOLDER.findall(template) if p not in facts]
@@ -277,7 +322,7 @@ def write_report(
         template = _ask(
             client,
             model,
-            SYSTEM,
+            system,
             user
             + "\n\nYour previous draft broke the rules ("
             + "; ".join(problems)

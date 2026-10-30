@@ -66,3 +66,58 @@ def test_facts_from_a_measurement_include_g_and_restitution(tmp_path):
     assert f["g"].value == pytest.approx(m.result.fit.g)
     assert f["e"].shown == f"{m.restitution.e:.3f}"
     assert f["n_arcs"].value == len(m.result.segments)
+
+
+def test_arabic_indic_digits_cannot_sneak_past_the_checker():
+    # ٩٫٨١ is 9.81 in Arabic-Indic digits; ۹.۸۱ in Eastern Arabic (Persian) digits
+    assert untraced_numbers("قيمة الكتاب ٩٫٨١ م/ث²", FACTS) == ["9.81"]
+    assert untraced_numbers("قيمة ۹.۸۱", FACTS) == ["9.81"]
+    assert untraced_numbers("من ٢٧ نقطة", FACTS) == []
+
+
+class FakeClient:
+    """Stands in for the Responses API: records the system prompt, returns drafts in order."""
+
+    def __init__(self, *drafts):
+        import json
+        import types
+
+        self.drafts, self.systems = list(drafts), []
+
+        def create(**kw):
+            self.systems.append(kw["input"][0]["content"][0]["text"])
+            return types.SimpleNamespace(output_text=json.dumps({"report": self.drafts.pop(0)}))
+
+        self.responses = types.SimpleNamespace(create=create)
+
+
+def test_report_in_arabic_keeps_the_measured_numbers():
+    from strobophone.report import write_report
+
+    client = FakeClient("بلغ تسارع الجاذبية المقيس [[g]] من [[n_points]] نقطة.")
+    r = write_report(FACTS, client, language="ar")
+    assert r.accepted and "Arabic" in client.systems[0]
+    assert r.text == "بلغ تسارع الجاذبية المقيس 9.68 m/s² من 27 نقطة."
+
+
+def test_report_segments_mark_each_number_with_its_source():
+    from strobophone.report import segments
+
+    parts = segments("g = [[g]] at [[fps]].", FACTS)
+    assert parts == [
+        {"text": "g = "},
+        {"text": "9.68 m/s²", "fact": "g", "source": "fit_free_fall", "label": "measured g"},
+        {"text": " at "},
+        {"text": "60 fps", "fact": "fps", "source": "prepare", "label": "frame rate"},
+        {"text": "."},
+    ]
+
+
+def test_text_facts_are_translated_for_arabic_but_numbers_are_untouched():
+    from strobophone.report import localize
+
+    facts = {**FACTS, "ref_vs_ci": Fact("ref_vs_ci", "outside", "outside", "report.facts_for", "ref")}
+    ar = localize(facts, "ar")
+    assert ar["ref_vs_ci"].shown == "خارج"
+    assert ar["g"] == FACTS["g"]
+    assert localize(facts, "en") == facts

@@ -7,9 +7,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import imageio_ffmpeg
 import numpy as np
 
-from strobophone.baseline import read_video
 from strobophone.bounce import RestitutionResult, measure_restitution
 from strobophone.calibration import Scale
 from strobophone.pipeline import FreeFallMeasurement, measure_free_fall
@@ -79,7 +79,7 @@ def track_video(
         log(f"capture rate set to {fps_override:g} fps (file says {fps / per_frame:g})")
         fps = fps_override * per_frame
     log(f"crop {prep.crop}, zoom {prep.zoom:g}x" if prep.crop else "no crop/zoom needed")
-    n_frames = len(read_video(clip)[0])
+    n_frames = imageio_ffmpeg.count_frames_and_secs(str(clip))[0]
 
     def logged_tracker(video, concept, n):
         log(f"asking SAM 3.1 for {concept!r}")

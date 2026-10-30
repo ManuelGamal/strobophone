@@ -171,3 +171,18 @@ def test_zoomed_clip_stays_within_encoder_size(fall):
     side = max(motion_roi(frames)[2:])
     p = plan_zoom(frames, target_px=32, max_side_px=2.5 * side)
     assert p.zoom == 2
+
+
+def test_prepare_streams_frames_instead_of_holding_the_clip(tmp_path):
+    """A 20 s 1080p60 upload decoded at once is ~7 GB; prep must use O(one frame)."""
+    import tracemalloc
+
+    from strobophone.prep import prepare
+
+    make_free_fall_video(tmp_path / "long.mp4", fall_s=1.5, rest_frames=60, ball_radius_m=0.012)
+    clip_bytes = 241 * 520 * 480 * 3
+    tracemalloc.start()
+    prepare(tmp_path / "long.mp4", tmp_path)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < clip_bytes / 4, f"peak {peak / 1e6:.0f} MB for a {clip_bytes / 1e6:.0f} MB clip"
