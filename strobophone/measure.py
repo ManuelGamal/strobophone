@@ -60,7 +60,13 @@ def horizontal_span(boxes: np.ndarray) -> float:
 
 
 def track_video(
-    video, workdir, tracker=_default_tracker, concepts=CONCEPTS, log=lambda line: None, pick=vertical_span
+    video,
+    workdir,
+    tracker=_default_tracker,
+    concepts=CONCEPTS,
+    log=lambda line: None,
+    pick=vertical_span,
+    fps_override: float | None = None,
 ) -> Track:
     """Prepare the clip, track with fallback concepts, and return the object that
     maximises `pick` (vertical span for a drop, horizontal for a pendulum), with
@@ -68,6 +74,10 @@ def track_video(
     log("checking field order and object size")
     prep, clip, fps = prepare(video, workdir)
     log(f"field order: {prep.parity or 'progressive'} -> {fps:g} fps")
+    if fps_override:
+        per_frame = 2 if prep.parity else 1  # deinterlacing doubled the file's rate
+        log(f"capture rate set to {fps_override:g} fps (file says {fps / per_frame:g})")
+        fps = fps_override * per_frame
     log(f"crop {prep.crop}, zoom {prep.zoom:g}x" if prep.crop else "no crop/zoom needed")
     n_frames = len(read_video(clip)[0])
 
@@ -85,11 +95,19 @@ def track_video(
 
 
 def measure_video(
-    video, workdir, scale: Scale, tracker=_default_tracker, concepts=CONCEPTS, log=lambda line: None
+    video,
+    workdir,
+    scale: Scale,
+    tracker=_default_tracker,
+    concepts=CONCEPTS,
+    log=lambda line: None,
+    fps_override: float | None = None,
 ) -> VideoMeasurement:
     """g from a free-fall clip. `scale` is in pixels of the original video.
-    `log` receives one human-readable line per step (shown live in the web app)."""
-    tr = track_video(video, workdir, tracker, concepts, log)
+    `log` receives one human-readable line per step (shown live in the web app).
+    `fps_override` is the true capture rate when the file's metadata is wrong
+    (slow-motion exports often say 30 fps)."""
+    tr = track_video(video, workdir, tracker, concepts, log, fps_override=fps_override)
     prep, clip, fps, concept, attempts, oid, boxes = (
         tr.prep, tr.clip, tr.fps, tr.concept, tr.attempts, tr.object_id, tr.boxes
     )

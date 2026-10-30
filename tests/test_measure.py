@@ -110,3 +110,14 @@ def test_track_video_returns_boxes_in_original_pixels(small_ball, tmp_path):
     y = (tr.boxes[:, 1] + tr.boxes[:, 3]) / 2
     np.testing.assert_allclose(y[truth.rest_frames + 5], truth.ball_y_px[truth.rest_frames + 5], atol=1.5)
     assert tr.fps == pytest.approx(truth.fps)
+
+
+def test_true_frame_rate_overrides_the_file(small_ball, tmp_path):
+    """Slow-motion exports often say 30 fps while capturing at 120/240; the user's
+    stated capture rate wins, and g follows it exactly (g scales as fps^2)."""
+    path, truth = small_ball
+    m = measure_video(
+        path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"ball"}), fps_override=truth.fps / 2
+    )
+    assert m.fps == pytest.approx(truth.fps / 2)
+    assert m.result.fit.g == pytest.approx(truth.g / 4, rel=0.01)

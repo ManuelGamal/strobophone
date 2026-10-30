@@ -131,19 +131,22 @@ def create_app(
         reference: str | None,
         experiment: str = "free_fall",
         length_m: float | None = None,
+        fps: float | None = None,
     ) -> None:
         job = jobs[job_id]
         job["status"] = "running"
         log = job["log"].append
         try:
-            frames, fps = read_video(video)
-            if len(frames) / fps > MAX_SECONDS:
+            frames, file_fps = read_video(video)
+            if len(frames) / file_fps > MAX_SECONDS:
                 raise ValueError(
-                    f"clip is {len(frames) / fps:.1f} s; trim it to under {MAX_SECONDS:g} s"
+                    f"clip is {len(frames) / file_fps:.1f} s; trim it to under {MAX_SECONDS:g} s"
                 )
             if experiment == "pendulum":
                 del frames
-                tr = track_video(video, video.parent, tracker, PENDULUM_CONCEPTS, log, pick=horizontal_span)
+                tr = track_video(
+                    video, video.parent, tracker, PENDULUM_CONCEPTS, log, pick=horizontal_span, fps_override=fps
+                )
                 x, y = (tr.boxes[:, 0] + tr.boxes[:, 2]) / 2, (tr.boxes[:, 1] + tr.boxes[:, 3]) / 2
                 m = measure_pendulum(np.arange(len(x)) / tr.fps, x, y, length_m)
                 log(
@@ -163,7 +166,7 @@ def create_app(
             else:
                 scale = Scale(px_per_m, 0.0)
             del frames
-            m = measure_video(video, video.parent, scale, tracker=tracker, log=log)
+            m = measure_video(video, video.parent, scale, tracker=tracker, log=log, fps_override=fps)
             job["result"] = _result_json(m, scale)
             job["status"] = "done"
         except Exception as e:  # reported to the user, not swallowed
@@ -177,7 +180,10 @@ def create_app(
         reference: str | None = Form(None),
         experiment: str = Form("free_fall"),
         length_m: float | None = Form(None),
+        fps: float | None = Form(None),
     ):
+        if fps is not None and not 1 <= fps <= 2000:
+            raise HTTPException(422, "capture frame rate must be between 1 and 2000 fps")
         if experiment not in ("free_fall", "pendulum"):
             raise HTTPException(422, "experiment must be free_fall or pendulum")
         if experiment == "pendulum":
@@ -220,7 +226,7 @@ def create_app(
             "result": None,
             "error": None,
         }
-        runner.submit(run, job_id, path, px_per_m, reference, experiment, length_m)
+        runner.submit(run, job_id, path, px_per_m, reference, experiment, length_m, fps)
         return {"id": job_id}
 
     @app.get("/api/jobs/{job_id}")

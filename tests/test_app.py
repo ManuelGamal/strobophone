@@ -103,3 +103,13 @@ def test_pendulum_needs_a_length(pendulum_clip, tmp_path):
     path, _ = pendulum_clip
     client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path))
     assert upload(client, path, experiment="pendulum").status_code == 422
+
+
+def test_stated_capture_rate_is_used(clip, tmp_path):
+    path, truth = clip
+    client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path))
+    r = upload(client, path, px_per_m=str(truth.px_per_m), fps=str(truth.fps / 2))
+    job = wait(client, r.json()["id"])
+    assert job["status"] == "done", job
+    assert job["result"]["g"] == pytest.approx(truth.g / 4, rel=0.01), job["log"]
+    assert any("file says" in line for line in job["log"])

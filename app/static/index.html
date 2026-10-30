@@ -115,6 +115,11 @@
           </label>
           <p class="hint">Side-on, camera still, under 20 s. Slow motion gives a sharper result.</p>
         </div>
+        <div>
+          <label for="fps">Capture frame rate (optional)</label>
+          <input type="number" id="fps" min="1" max="2000" step="any" placeholder="from the file" aria-describedby="fps-hint">
+          <p class="hint" id="fps-hint">Slow-motion exports often say 30 fps while filming at 120 or 240. Enter the real rate; g follows it (g ∝ fps²).</p>
+        </div>
         <fieldset id="scale-field">
           <legend>Scale</legend>
           <label class="choice"><input type="radio" name="scale" value="A4" checked> A4 sheet in the fall plane</label>
@@ -234,6 +239,9 @@ form.addEventListener("submit", async (ev) => {
     if (!(v > 0)) { $("form-error").textContent = "Enter the scale in pixels per metre, or choose the A4 sheet."; $("px_per_m").focus(); return; }
     data.append("px_per_m", v);
   } else data.append("reference", mode);
+  const fps = parseFloat($("fps").value);
+  if ($("fps").value && !(fps >= 1 && fps <= 2000)) { $("form-error").textContent = "Frame rate must be between 1 and 2000 fps, or left empty."; $("fps").focus(); return; }
+  if (fps) data.append("fps", fps);
   runBtn.disabled = true; runBtn.textContent = "Measuring…";
   setLog(["uploading…"]);
   try {
