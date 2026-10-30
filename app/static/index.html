@@ -91,10 +91,11 @@
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
   .report-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .report-controls select { min-height: 44px; }
+  .report-controls select { min-height: 44px; min-width: 128px; font: inherit; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+  .report-controls button { width: auto; flex: 1 1 220px; }
   .report-text { font-size: 16px; line-height: 1.75; margin: 16px 0 0; }
   .report-text[dir="rtl"] { font-family: "IBM Plex Sans Arabic", var(--sans, sans-serif); font-size: 17px; }
-  .report-text mark { background: color-mix(in srgb, var(--trace) 16%, transparent); color: inherit; border-bottom: 2px solid var(--trace); padding: 0 2px; border-radius: 2px; unicode-bidi: isolate; direction: ltr; cursor: help; }
+  .report-text mark { background: color-mix(in srgb, var(--trace) 16%, transparent); color: inherit; border-bottom: 2px solid var(--trace); padding: 0 2px; border-radius: 2px; white-space: nowrap; unicode-bidi: isolate; direction: ltr; cursor: help; }
   .report-meta { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
 </style>
 </head>

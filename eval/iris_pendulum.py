@@ -23,12 +23,12 @@ sys.path[:0] = [str(ROOT), str(ROOT / "eval")]
 
 from apple_pi_auto import cached_tracker
 
-from strobophone.measure import horizontal_span, track_video
+from strobophone.measure import PENDULUM_CONCEPTS, horizontal_span, track_video
 from strobophone.pendulum import measure_pendulum
 
 DATA = next((p for p in (ROOT / "data" / "iris_small").rglob("parameters.json")), None)
 OUT = ROOT / "outputs" / "iris"
-CONCEPTS = ("pendulum bob", "ball", "weight", "sphere", "round object")
+CONCEPTS = PENDULUM_CONCEPTS  # the app's own order, not tuned on IRIS
 G_REF = 9.81  # what IRIS lists for its falling-ball setting
 
 
