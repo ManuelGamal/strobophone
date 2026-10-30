@@ -150,3 +150,24 @@ def test_progressive_synthetic_clip_is_left_progressive(tmp_path):
     make_free_fall_video(src, ball_radius_m=0.06)
     prep, path, fps = prepare(src, tmp_path)
     assert prep.parity is None and prep.zoom == 1 and path == src
+
+
+def test_horizontal_mover_counts_as_moving():
+    def sideways(video, concept, n):
+        b = np.zeros((n, 4))
+        b[:, 0] = np.linspace(0, 200, n)
+        b[:, 2] = b[:, 0] + 10
+        b[:, 1], b[:, 3] = 100, 110
+        return {"0": b}
+
+    concept, _, attempts = track_with_fallbacks("v.mp4", ["bob"], 20, sideways)
+    assert concept == "bob"
+
+
+def test_zoomed_clip_stays_within_encoder_size(fall):
+    """A wide moving region (Apple-PI projectile 000058: 1280x774 at 4x) once asked
+    x264 for a 5120x3096 encode, which crashed ffmpeg; the zoom is capped instead."""
+    _, frames = fall
+    side = max(motion_roi(frames)[2:])
+    p = plan_zoom(frames, target_px=32, max_side_px=2.5 * side)
+    assert p.zoom == 2

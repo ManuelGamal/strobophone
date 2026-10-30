@@ -56,10 +56,13 @@ def motion_roi(frames: np.ndarray, pad_px: int = 20) -> tuple[int, int, int, int
     return int(x0), int(y0), int(w), int(h)
 
 
-def plan_zoom(frames: np.ndarray, target_px: float = 32, max_zoom: float = 6, min_px: float = 16) -> Prep:
+def plan_zoom(
+    frames: np.ndarray, target_px: float = 32, max_zoom: float = 6, min_px: float = 16, max_side_px: float = 3840
+) -> Prep:
     """Crop to the moving region and zoom so the smallest moving object is about
     `target_px` wide, but only when it is under `min_px`: SAM misses objects of a
-    few pixels, while zooming objects it already sees costs accuracy and upload size."""
+    few pixels, while zooming objects it already sees costs accuracy and upload size.
+    The zoomed clip's long side stays within `max_side_px` (x264 fails on huge frames)."""
     widths = []
     for m in _motion_masks(frames):
         lab, k = ndimage.label(m)
@@ -75,10 +78,11 @@ def plan_zoom(frames: np.ndarray, target_px: float = 32, max_zoom: float = 6, mi
             widths.append(min(sizes))
     if not widths or np.median(widths) >= min_px:
         return Prep(None, 1.0, None)
-    zoom = min(max_zoom, math.ceil(target_px / float(np.median(widths))))
+    crop = motion_roi(frames)
+    zoom = min(max_zoom, math.ceil(target_px / float(np.median(widths))), math.floor(max_side_px / max(crop[2:])))
     if zoom <= 1:
         return Prep(None, 1.0, None)
-    return Prep(motion_roi(frames), float(zoom), None)
+    return Prep(crop, float(zoom), None)
 
 
 def parse_idet(log: str) -> dict[str, int]:
@@ -101,9 +105,15 @@ def zigzag_score(y: np.ndarray) -> float:
     return float(np.mean(np.abs(np.diff(v, 3)))) if len(v) > 3 else float("inf")
 
 
+def _span(b: np.ndarray) -> float:
+    """How far a tracked box moves: the larger of its centre's x and y ranges."""
+    cx, cy = (b[:, 0] + b[:, 2]) / 2, (b[:, 1] + b[:, 3]) / 2
+    return float(max(np.nanmax(cx) - np.nanmin(cx), np.nanmax(cy) - np.nanmin(cy)))
+
+
 def track_with_fallbacks(video, concepts, n_frames, tracker, min_span_px: float = 30, on_attempt=None):
     """Try concept phrases in order until the tracker returns an object that moves
-    at least `min_span_px` vertically. Returns (concept, boxes, attempts);
+    at least `min_span_px` (horizontally or vertically). Returns (concept, boxes, attempts);
     `on_attempt(concept, outcome)` is called as each attempt finishes."""
     attempts = []
 
@@ -117,11 +127,7 @@ def track_with_fallbacks(video, concepts, n_frames, tracker, min_span_px: float 
         if not boxes:
             record(concept, "nothing found")
             continue
-        if any(
-            np.nanmax(b[:, 3]) - np.nanmin(b[:, 3]) >= min_span_px
-            for b in boxes.values()
-            if np.any(~np.isnan(b[:, 3]))
-        ):
+        if any(_span(b) >= min_span_px for b in boxes.values() if np.any(~np.isnan(b[:, 3]))):
             record(concept, "ok")
             return concept, boxes, attempts
         record(concept, "no moving object")

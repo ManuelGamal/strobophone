@@ -100,3 +100,13 @@ def test_no_restitution_without_a_bounce(small_ball, tmp_path):
     path, truth = small_ball
     m = measure_video(path, tmp_path, Scale(truth.px_per_m, 0.0), colour_tracker({"ball"}))
     assert m.restitution is None
+
+
+def test_track_video_returns_boxes_in_original_pixels(small_ball, tmp_path):
+    from strobophone.measure import track_video
+
+    path, truth = small_ball
+    tr = track_video(path, tmp_path, colour_tracker({"ball"}))
+    y = (tr.boxes[:, 1] + tr.boxes[:, 3]) / 2
+    np.testing.assert_allclose(y[truth.rest_frames + 5], truth.ball_y_px[truth.rest_frames + 5], atol=1.5)
+    assert tr.fps == pytest.approx(truth.fps)

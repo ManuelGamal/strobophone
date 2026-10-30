@@ -38,11 +38,32 @@ def _default_tracker(video, concept, n_frames):
     return sam.track_boxes(video, concept, n_frames)
 
 
-def measure_video(
-    video, workdir, scale: Scale, tracker=_default_tracker, concepts=CONCEPTS, log=lambda line: None
-) -> VideoMeasurement:
-    """g from a free-fall clip. `scale` is in pixels of the original video.
-    `log` receives one human-readable line per step (shown live in the web app)."""
+@dataclass(frozen=True)
+class Track:
+    prep: Prep
+    clip: Path
+    fps: float
+    concept: str
+    attempts: list[tuple[str, str]]
+    object_id: str
+    boxes: np.ndarray  # (n, 4) l, t, r, b in original pixels
+
+
+def vertical_span(boxes: np.ndarray) -> float:
+    return float(np.nanmax(boxes[:, 3]) - np.nanmin(boxes[:, 3]))
+
+
+def horizontal_span(boxes: np.ndarray) -> float:
+    cx = (boxes[:, 0] + boxes[:, 2]) / 2
+    return float(np.nanmax(cx) - np.nanmin(cx))
+
+
+def track_video(
+    video, workdir, tracker=_default_tracker, concepts=CONCEPTS, log=lambda line: None, pick=vertical_span
+) -> Track:
+    """Prepare the clip, track with fallback concepts, and return the object that
+    maximises `pick` (vertical span for a drop, horizontal for a pendulum), with
+    its boxes mapped back to the original pixels."""
     log("checking field order and object size")
     prep, clip, fps = prepare(video, workdir)
     log(f"field order: {prep.parity or 'progressive'} -> {fps:g} fps")
@@ -57,14 +78,20 @@ def measure_video(
         clip, concepts, n_frames, logged_tracker, on_attempt=lambda c, r: log(f"{c!r}: {r}")
     )
     if concept is None:
-        raise ValueError(
-            "no falling object found: " + "; ".join(f"{c!r}: {r}" for c, r in attempts)
-        )
-    # The falling object is the one that moves furthest vertically.
-    oid, boxes = max(
-        tracks.items(), key=lambda kv: np.nanmax(kv[1][:, 3]) - np.nanmin(kv[1][:, 3])
+        raise ValueError("no moving object found: " + "; ".join(f"{c!r}: {r}" for c, r in attempts))
+    oid, boxes = max(tracks.items(), key=lambda kv: pick(kv[1]))
+    return Track(prep, clip, fps, concept, attempts, oid, prep.to_original(boxes))
+
+
+def measure_video(
+    video, workdir, scale: Scale, tracker=_default_tracker, concepts=CONCEPTS, log=lambda line: None
+) -> VideoMeasurement:
+    """g from a free-fall clip. `scale` is in pixels of the original video.
+    `log` receives one human-readable line per step (shown live in the web app)."""
+    tr = track_video(video, workdir, tracker, concepts, log)
+    prep, clip, fps, concept, attempts, oid, boxes = (
+        tr.prep, tr.clip, tr.fps, tr.concept, tr.attempts, tr.object_id, tr.boxes
     )
-    boxes = prep.to_original(boxes)
     y = (boxes[:, 1] + boxes[:, 3]) / 2
     result = measure_free_fall(y, fps, scale)
     lo, hi = result.g_ci_with_scale
