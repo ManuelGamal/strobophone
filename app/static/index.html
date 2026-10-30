@@ -301,7 +301,7 @@ function show(videoUrl, res, credit) {
   }));
   const p = res.prep;
   $("report-out").replaceChildren();
-  $("report-panel").hidden = res.experiment === "pendulum" || !currentJob;
+  $("report-panel").hidden = !currentJob;
   if (res.experiment === "pendulum") return showPendulum(videoUrl, res, p);
   const facts = [
     ["frame rate", `${res.fps.toFixed(res.fps % 1 ? 2 : 0)} fps${p.parity ? " (fields)" : ""}`],

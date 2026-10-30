@@ -121,3 +121,19 @@ def test_text_facts_are_translated_for_arabic_but_numbers_are_untouched():
     assert ar["ref_vs_ci"].shown == "خارج"
     assert ar["g"] == FACTS["g"]
     assert localize(facts, "en") == facts
+
+
+def test_pendulum_facts_and_prompt_name_the_experiment():
+    from strobophone.pendulum import measure_pendulum
+    from strobophone.report import facts_for_pendulum, write_report
+    from tests.test_pendulum import simulate
+
+    t, x, y = simulate(60)
+    m = measure_pendulum(t, x, y, length_m=0.5)
+    facts = facts_for_pendulum(m, length_m=0.5, fps=60.0, concept="ball")
+    assert facts["g"].value == m.g and facts["length"].shown == "0.500 m"
+    assert facts["g_small_angle"].value == m.g_small_angle
+    assert facts["n_cycles"].shown == str(m.n_cycles)
+    client = FakeClient("g = [[g]] from [[n_cycles]] swings.")
+    assert write_report(facts, client, experiment="pendulum").accepted
+    assert "pendulum experiment" in client.systems[0]

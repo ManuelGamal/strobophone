@@ -13,6 +13,8 @@ import json
 import re
 from dataclasses import dataclass
 
+import numpy as np
+
 PLACEHOLDER = re.compile(r"\[\[(\w+)\]\]")
 NUMBER = re.compile(r"(?<![\w.])[-+]?\d+(?:\.\d+)?")
 # Text that contains digits but is not a measured number.
@@ -234,7 +236,35 @@ def facts_for(m, scale) -> dict[str, Fact]:
     return {i: Fact(i, v, s, src, lab) for i, v, s, src, lab in items}
 
 
-SYSTEM = """You write the results section of a physics lab report for a free-fall experiment.
+def facts_for_pendulum(m, length_m: float, fps: float, concept: str) -> dict[str, Fact]:
+    """Facts from a pendulum measurement (strobophone.pendulum.PendulumResult)."""
+    lo, hi = m.ci
+    dev = 100 * (m.g - G_REFERENCE) / G_REFERENCE
+    bias = 100 * (m.g_small_angle - m.g) / m.g
+    T = float(np.mean(m.periods))
+    amp0 = float(np.degrees(m.amplitudes[0]))
+    inside = "inside" if lo <= G_REFERENCE <= hi else "outside"
+    items = [
+        ("g", m.g, f"{m.g:.3f} m/s²", "measure_pendulum", "measured g (amplitude-corrected)"),
+        ("g_ci_low", lo, f"{lo:.3f} m/s²", "measure_pendulum", "95% CI lower bound over swings"),
+        ("g_ci_high", hi, f"{hi:.3f} m/s²", "measure_pendulum", "95% CI upper bound over swings"),
+        ("g_reference", G_REFERENCE, f"{G_REFERENCE:.2f} m/s²", "constant", "reference g in Cairo"),
+        ("deviation_pct", dev, f"{dev:+.1f}%", "report.facts_for_pendulum", "measured g minus reference, percent"),
+        ("ref_vs_ci", inside, inside, "report.facts_for_pendulum", "whether the reference g lies inside or outside the 95% interval"),
+        ("ci_level", 95, "95%", "convention", "confidence level of every interval"),
+        ("n_cycles", m.n_cycles, str(m.n_cycles), "measure_pendulum", "full swings timed"),
+        ("mean_period", T, f"{T:.4f} s", "measure_pendulum", "mean period of a full swing"),
+        ("amp0", amp0, f"{amp0:.1f}°", "measure_pendulum", "amplitude of the first swing"),
+        ("g_small_angle", m.g_small_angle, f"{m.g_small_angle:.3f} m/s²", "measure_pendulum", "g from the small-angle formula, without the amplitude correction"),
+        ("small_angle_bias_pct", bias, f"{bias:+.1f}%", "report.facts_for_pendulum", "error the small-angle formula would make"),
+        ("length", length_m, f"{length_m:.3f} m", "user", "string length, pivot to bob centre (entered by the student)"),
+        ("fps", fps, f"{fps:g} fps", "prepare", "frame rate of the analysed clip"),
+        ("concept", concept, f"“{concept}”", "track_with_fallbacks", "SAM 3.1 concept phrase that found the bob"),
+    ]
+    return {i: Fact(i, v, s, src, lab) for i, v, s, src, lab in items}
+
+
+SYSTEM = """You write the results section of a physics lab report for a {experiment} experiment.
 Rules:
 - Never type a digit. Cite every number as a placeholder [[fact_id]] from the fact list; it is replaced by the measured value.
 - Use only the facts given. Do not add textbook values, other experiments or numbers of your own.
@@ -299,11 +329,12 @@ def write_report(
     model: str = "muse-spark-1.3",
     max_revisions: int = 2,
     language: str = "en",
+    experiment: str = "free-fall",
 ) -> Report:
     """Spark drafts with placeholders; the checker sends it back until no untraced
     number or unknown placeholder remains, or blocks it after `max_revisions`."""
     user = "Facts (cite as placeholders):\n" + _fact_table(facts, with_values=True)
-    system = SYSTEM.format(language=LANGUAGES[language])
+    system = SYSTEM.format(language=LANGUAGES[language], experiment=experiment)
     template = _ask(client, model, system, user)
     for revision in range(max_revisions + 1):
         problems = []

@@ -35,7 +35,14 @@ from strobophone.measure import (
     track_video,
 )
 from strobophone.pendulum import measure_pendulum
-from strobophone.report import LANGUAGES, facts_for, localize, segments, write_report
+from strobophone.report import (
+    LANGUAGES,
+    facts_for,
+    facts_for_pendulum,
+    localize,
+    segments,
+    write_report,
+)
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024
@@ -140,7 +147,7 @@ def create_app(
     runner = ThreadPoolExecutor(max_workers=1)
     quota = {"day": dt.date.today(), "used": 0}
     lock = threading.Lock()
-    measured: dict[str, tuple] = {}  # job id -> (measurement, scale), for reports
+    measured: dict[str, tuple] = {}  # job id -> (experiment name, report facts), for reports
 
     def take_quota() -> None:
         with lock:
@@ -181,6 +188,7 @@ def create_app(
                 )
                 log(f"g = {m.g:.3f} m/s^2, 95% CI [{m.ci[0]:.3f}, {m.ci[1]:.3f}] (small-angle formula: {m.g_small_angle:.3f})")
                 job["result"] = _pendulum_json(tr, m)
+                measured[job_id] = ("pendulum", facts_for_pendulum(m, length_m, tr.fps, tr.concept))
                 job["status"] = "done"
                 return
             if reference:
@@ -193,7 +201,7 @@ def create_app(
                 scale = Scale(px_per_m, 0.0)
             m = measure_video(video, video.parent, scale, tracker=tracker, log=log, fps_override=fps)
             job["result"] = _result_json(m, scale)
-            measured[job_id] = (m, scale)
+            measured[job_id] = ("free-fall", facts_for(m, scale))
             job["status"] = "done"
         except Exception as e:  # reported to the user, not swallowed
             job["error"] = str(e)
@@ -258,13 +266,13 @@ def create_app(
         """Muse Spark drafts the results section with [[fact]] placeholders; code fills
         in every number and blocks drafts with numbers it cannot trace to a tool."""
         if job_id not in measured:
-            raise HTTPException(404, "no free-fall measurement with this id")
+            raise HTTPException(404, "no finished measurement with this id")
         if body.language not in LANGUAGES:
             raise HTTPException(422, f"language must be one of {', '.join(LANGUAGES)}")
         take_quota()
-        m, scale = measured[job_id]
-        facts = localize(facts_for(m, scale), body.language)
-        r = write_report(facts, report_client or _spark_client(), language=body.language)
+        experiment, facts = measured[job_id]
+        facts = localize(facts, body.language)
+        r = write_report(facts, report_client or _spark_client(), language=body.language, experiment=experiment)
         return {
             "language": body.language,
             "accepted": r.accepted,

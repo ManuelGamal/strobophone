@@ -147,3 +147,16 @@ def test_report_with_typed_numbers_is_blocked(clip, tmp_path):
     job = wait(client, upload(client, path, px_per_m=str(truth.px_per_m)).json()["id"])
     rep = client.post(f"/api/jobs/{job['id']}/report", json={"language": "en"}).json()
     assert not rep["accepted"] and rep["untraced"] == ["12.34"] and rep["segments"] == []
+
+
+def test_pendulum_lab_report(pendulum_clip, tmp_path):
+    from tests.test_report import FakeClient
+
+    path, truth = pendulum_clip
+    fake = FakeClient("g = [[g]] from [[n_cycles]] swings of [[length]].")
+    client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=tmp_path, report_client=fake))
+    job = wait(client, upload(client, path, experiment="pendulum", length_m="0.5").json()["id"], timeout_s=120)
+    rep = client.post(f"/api/jobs/{job['id']}/report", json={"language": "en"}).json()
+    assert rep["accepted"], rep
+    assert [s["fact"] for s in rep["segments"] if "fact" in s] == ["g", "n_cycles", "length"]
+    assert "pendulum experiment" in fake.systems[0]
