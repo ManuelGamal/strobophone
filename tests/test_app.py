@@ -160,3 +160,15 @@ def test_pendulum_lab_report(pendulum_clip, tmp_path):
     assert rep["accepted"], rep
     assert [s["fact"] for s in rep["segments"] if "fact" in s] == ["g", "n_cycles", "length"]
     assert "pendulum experiment" in fake.systems[0]
+
+
+def test_finished_jobs_keep_only_the_upload(tmp_path):
+    """Zoomed intermediates can be tens of MB; a public demo must not accumulate them."""
+    path = tmp_path / "small.mp4"
+    truth = make_free_fall_video(path, ball_radius_m=0.012)  # small ball: gets zoomed
+    work = tmp_path / "jobs"
+    client = TestClient(create_app(tracker=colour_tracker({"ball"}), workdir=work))
+    job = wait(client, upload(client, path, px_per_m=str(truth.px_per_m)).json()["id"])
+    assert job["status"] == "done", job
+    assert job["result"]["prep"]["zoom"] > 1
+    assert sorted(p.name for p in (work / job["id"]).iterdir()) == ["upload.mp4"]

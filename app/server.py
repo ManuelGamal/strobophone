@@ -206,6 +206,10 @@ def create_app(
         except Exception as e:  # reported to the user, not swallowed
             job["error"] = str(e)
             job["status"] = "failed"
+        finally:  # keep only the upload (served back to the page); intermediates can be large
+            for f in video.parent.iterdir():
+                if f != video and f.is_file():
+                    f.unlink(missing_ok=True)
 
     @app.post("/api/measure", status_code=202)
     async def measure(

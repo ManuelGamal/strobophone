@@ -65,6 +65,9 @@ def main() -> None:
                 rows.append({**row, "status": f"failed: {e}"})
                 print(rows[-1], flush=True)
                 continue
+            finally:  # zoomed clips are rebuilt on every run; SAM tracks stay cached
+                for f in work.glob("*_zoom.mp4"):
+                    f.unlink()
             try:
                 g_tof = g_from_time_of_flight(m.y_px, p["drop_height"], m.fps)
             except ValueError:
