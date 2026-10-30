@@ -16,7 +16,8 @@ from strobophone.pipeline import FreeFallMeasurement, measure_free_fall
 from strobophone.prep import Prep, prepare, track_with_fallbacks
 
 CONCEPTS = ("ball", "white ball", "sphere", "round object", "circle")
-PENDULUM_CONCEPTS = ("pendulum bob", "ball", "weight", "sphere", "round object")
+# "ball" first: on real IRIS footage "pendulum bob" found nothing on 7/7 clips (it only cost a SAM call)
+PENDULUM_CONCEPTS = ("ball", "pendulum bob", "weight", "sphere", "round object")
 
 
 @dataclass(frozen=True)
