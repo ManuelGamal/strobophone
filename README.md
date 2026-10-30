@@ -19,6 +19,10 @@ We told Muse Spark that real Apple-π drop clips were filmed at 15 fps instead o
 
 Spark also **misreported what it saw so the answer matched the textbook value**. On all 33 single-ball clips where the check is possible, the fall duration Spark stated was half the tracked one (median ratio 0.50, IQR 0.48–0.51). It wrote "impact at ~8 frames" when the ball takes ~16. (`eval/spark_counterfactual.py`)
 
+**The same happens with a pendulum.** We gave Spark real IRIS pendulum clips (60 fps) and told it either 60 or 30 fps:
+- **Told 30 fps:** it still answered g ≈ 9.6–9.8 (6/6), and halved the frame count it claims for one swing (0.48× the tracked count).
+- **Told the true 60 fps:** it said one swing takes 85 frames in 5 of 6 clips. That is exactly the textbook 2π√(L/g) × 60 = 85.1, whatever the amplitude. The real swings take 87–92 frames and get longer at larger amplitude, which StroboPhone measures and corrects for. (`eval/spark_pendulum_counterfactual.py`)
+
 So in StroboPhone, models do what they are good at and code does the arithmetic:
 
 ```
