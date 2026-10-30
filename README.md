@@ -48,13 +48,16 @@ phone video ──► clip prep (field order, crop/zoom, streamed: O(1 frame) me
 | Restitution e on tennis-ball drops | median error 0.008 | `eval/apple_pi_auto.py` |
 | Report agent (English): untraced numbers in accepted reports | **0** in 36 reports | `eval/report_faithfulness.py` |
 | Report agent (Arabic) accepted on the first draft | **12/12** | `eval/report_arabic.py` |
-| IRIS real 4K pendulum clips (30) | *pending* | `eval/iris_pendulum.py` |
-| IRIS real drops (60), time of flight and ball-size scale | *pending* | `eval/iris_fall.py` |
+| IRIS real 4K pendulum clips: g stays flat as a real swing dies down (per 10° of amplitude) | **+0.004 / −0.022 m/s²** at 20° / 45°, vs −0.15 / −0.26 for the textbook formula | `eval/iris_pendulum_cycles.py` |
+| IRIS pendulum, spread of g across release angles 20° / 45° / ~75° | **3.2%** corrected vs 9.7% small-angle; ±0.01–0.03 m/s² between takes (17 clips) | `eval/iris_pendulum.py`, `eval/iris_summary.py` |
+| IRIS real drops (20 side-on clips), ball-size scale | median g 9.47; 95% interval contains 9.81 in **19/20** | `eval/iris_fall.py` |
 
 ## Limitations (measured, not hidden)
 
 - **Absolute g on Apple-π is not quoted.** The only scale there is the ball's own box width, so values span 4–13 m/s². The arc check exists because one such clip gave a convincing-looking 10.39.
 - **Time-of-flight g on Apple-π projectile clips is unreliable** (median error 22.7% on 31 clips at 30 fps). The table-edge release is not detected precisely enough.
+- **IRIS pendulum absolute g is 4–5% low** (9.16–9.46 m/s²) with the stated "rope length 0.5 m". That matches a pivot-to-centre length of 0.52 m; IRIS does not say where the length was measured. Above ~60° amplitude some drift remains (−0.10 m/s² per 10°), consistent with air drag on a light tennis ball.
+- **IRIS drops of light balls:** the arc-consistency check flags all 20 clips. On a light 22 cm ball, air drag makes the fast drop and the slow rebounds disagree, so the intervals are honest but wide (median ±0.98 m/s²). Time-of-flight g at 60 fps is 9.46 median, but one frame of release timing is worth ~7%. IRIS's Dropping_ball clips are filmed top-down (the ball falls along the camera axis), which side-on tracking cannot measure; they are excluded.
 - **The faithfulness eval shows a guarantee, not an improvement.** Given the same finished facts, free-writing Spark also copied numbers correctly. The counterfactual above is where unconstrained Spark fails. The number checker does not catch unsupported qualitative claims.
 
 ## Run it
@@ -74,7 +77,7 @@ echo MODEL_API_KEY=... > .env                                          # Meta AP
 ## Data
 
 - **Apple-π** (yaorunmao/Apple-PI-GT, CC BY 4.0): evaluation only; nothing was tuned on it, except one disclosed change (zoom only objects under 16 px).
-- **IRIS** (rasulkhanbayov/IRIS, CC BY-NC 4.0): evaluation only. Clips were shrunk on Kaggle (`kaggle/iris_prep`) and are not redistributed.
+- **IRIS** (rasulkhanbayov/IRIS, CC BY-NC 4.0): evaluation only. Clips were shrunk on Kaggle (`kaggle/iris_prep`) and are not redistributed. One change was made after seeing it: the pendulum concept list now tries "ball" before "pendulum bob" (the latter found nothing on real clips). This saves a SAM call and does not change any measurement.
 
 ## Built during the hackathon
 
