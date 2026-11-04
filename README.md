@@ -4,6 +4,9 @@ A phone becomes a physics-lab measurement instrument. Film an experiment and SAM
 
 Entry for the Meta Global AI Developer Hackathon 2026 (Indie track, *Push the Frontier*).
 
+- **Live demo:** https://huggingface.co/spaces/ManuelGamal/strobophone. No clip handy? Load one of the simulated samples (a drop at 240 fps, or a 0.60 m pendulum), each with a known answer.
+- **3-minute video:** https://youtu.be/G-nkOVWi_rU
+
 ## Why
 
 A school physics lab measures g with photogates or ticker timers that many schools do not have. Every student has a phone. StroboPhone turns a phone video into a measurement **with an honest 95% interval**, plus a lab report in English or Arabic, and it warns when the setup, rather than the physics, produced the number.
