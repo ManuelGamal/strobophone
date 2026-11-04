@@ -12,6 +12,17 @@ A4_M = (0.210, 0.297)
 BALL_RGB = (240, 110, 20)
 
 
+def _shaded_ball(xx: np.ndarray, yy: np.ndarray, cx: float, cy: float, r: float) -> np.ndarray:
+    """A lit sphere (diffuse plus a highlight), so it reads as a ball rather than a flat disc."""
+    nx, ny = (xx - cx) / r, (yy - cy) / r
+    nz = np.sqrt(np.clip(1 - nx**2 - ny**2, 0, 1))
+    lx, ly, lz = -0.45, -0.55, 0.70
+    diffuse = np.clip(nx * lx + ny * ly + nz * lz, 0, 1)
+    spec = diffuse**40
+    rgb = np.array(BALL_RGB, np.float32)
+    return (rgb * (0.35 + 0.75 * diffuse[..., None]) + 255 * 0.6 * spec[..., None]).astype(np.float32)
+
+
 @dataclass(frozen=True)
 class FreeFallTruth:
     fps: int
@@ -34,6 +45,7 @@ def make_free_fall_video(
     size: tuple[int, int] = (480, 520),
     ball_radius_m: float = 0.04,
     y0_px: float = 60.0,
+    shaded: bool = False,
 ) -> FreeFallTruth:
     """Render an orange ball falling past an A4 sheet on a textured wall."""
     width, height = size
@@ -58,7 +70,8 @@ def make_free_fall_video(
     for y in ys:
         d = np.sqrt((xx - cx) ** 2 + (yy - y) ** 2)
         alpha = np.clip(r - d + 0.5, 0, 1)[..., None]  # antialiased edge
-        frame = wall * (1 - alpha) + np.array(BALL_RGB, np.float32) * alpha
+        ball = _shaded_ball(xx, yy, cx, y, r) if shaded else np.array(BALL_RGB, np.float32)
+        frame = wall * (1 - alpha) + ball * alpha
         writer.send(np.clip(frame, 0, 255).astype(np.uint8).tobytes())
     writer.close()
     return FreeFallTruth(fps, px_per_m, g, rest_frames, cx, ys, (ax, ay, a4_w_px, a4_h_px))
@@ -85,6 +98,7 @@ def make_pendulum_video(
     px_per_m: float = 600.0,
     bob_radius_m: float = 0.025,
     size: tuple[int, int] = (720, 400),
+    shaded: bool = False,
 ) -> PendulumTruth:
     """Render an orange bob on a dark string swinging as a damped nonlinear pendulum."""
     from scipy.integrate import solve_ivp
@@ -114,7 +128,8 @@ def make_pendulum_video(
         string = np.clip(1.5 - np.hypot(xx - px - u * (bx - px), yy - py - u * (by - py)), 0, 1)[..., None]
         bob = np.clip(r - np.hypot(xx - bx, yy - by) + 0.5, 0, 1)[..., None]
         frame = wall * (1 - string) + 40 * string
-        frame = frame * (1 - bob) + np.array(BALL_RGB, np.float32) * bob
+        ball = _shaded_ball(xx, yy, bx, by, r) if shaded else np.array(BALL_RGB, np.float32)
+        frame = frame * (1 - bob) + ball * bob
         writer.send(np.clip(frame, 0, 255).astype(np.uint8).tobytes())
     writer.close()
     return PendulumTruth(fps, g, length_m, (px, py), theta)

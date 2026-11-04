@@ -1,0 +1,12 @@
+imageio-ffmpeg
+meta-sam-parser==0.1.0
+numpy
+openai
+python-dotenv
+requests
+scipy
+pillow
+fastapi
+uvicorn
+python-multipart
+httpx
