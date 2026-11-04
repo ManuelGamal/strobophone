@@ -245,7 +245,11 @@ document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("cl
   const s = SAMPLES[b.dataset.sample];
   b.disabled = true;
   try {
-    const blob = await (await fetch(s.url)).blob();
+    // The Space ships without the binary clips; fall back to the GitHub copy.
+    let r = await fetch(s.url);
+    if (!r.ok) r = await fetch("https://raw.githubusercontent.com/ManuelGamal/strobophone/main/app/static/" + s.url);
+    if (!r.ok) throw new Error(r.statusText);
+    const blob = await r.blob();
     const dt = new DataTransfer();
     dt.items.add(new File([blob], s.url.split("/").pop(), { type: "video/mp4" }));
     const radio = form.querySelector(`input[name=experiment][value=${s.experiment}]`);
